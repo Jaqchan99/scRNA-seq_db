@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # scRNA-seq Data Processing Platform
 
 一个用于单细胞RNA测序数据标准化与前置处理的平台，支持数据入库前的准备和审核。
@@ -214,3 +215,6 @@ curl "http://localhost:8000/submissions/{submission_id}/export" -o processed_dat
 
 MIT License
 
+=======
+# scRNA-seq_db
+>>>>>>> bea7ad2d31ed4d25f52c0107b01f30ca3dab40c7

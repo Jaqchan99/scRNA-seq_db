@@ -8,8 +8,7 @@ from datetime import datetime
 from typing import Optional
 import json
 
-from database import get_db, init_db
-from models import Submission, MappingLog
+from database import get_db, init_db, Submission, MappingLog
 from upload_service import UploadService
 from validation_service import ValidationService
 from mapping_service import MappingService
