@@ -63,6 +63,9 @@ def create_test_data():
         adata.write_h5ad(TEST_FILE)
         print(f"✅ 测试数据已创建: {TEST_FILE}")
         
+        # 确保文件句柄关闭
+        del adata
+        
         return True
         
     except ImportError as e:
@@ -205,12 +208,22 @@ def cleanup_test_files():
             files = glob.glob(pattern)
             for file in files:
                 if os.path.exists(file):
-                    os.remove(file)
-                    print(f"   删除: {file}")
+                    try:
+                        os.remove(file)
+                        print(f"   删除: {file}")
+                    except PermissionError:
+                        print(f"   跳过（文件被占用）: {file}")
+                    except Exception as e:
+                        print(f"   删除失败: {file} - {e}")
         else:
             if os.path.exists(pattern):
-                os.remove(pattern)
-                print(f"   删除: {pattern}")
+                try:
+                    os.remove(pattern)
+                    print(f"   删除: {pattern}")
+                except PermissionError:
+                    print(f"   跳过（文件被占用）: {pattern}")
+                except Exception as e:
+                    print(f"   删除失败: {pattern} - {e}")
 
 def main():
     """主函数"""
