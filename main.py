@@ -163,42 +163,85 @@ async def get_export(submission_id: str):
         filename=f"processed_{submission_id}.h5ad"
     )
 
-async def process_submission(submission_id: str):
+def process_submission(submission_id: str):
     """后台处理提交的数据"""
+    print(f"🚀 开始处理提交 {submission_id}")
+    
     try:
         db = next(get_db())
         submission = db.query(Submission).filter(Submission.id == submission_id).first()
         
         if not submission:
+            print(f"❌ 找不到提交记录: {submission_id}")
+            return
+        
+        print(f"📁 处理文件: {submission.file_path}")
+        
+        # 检查文件是否存在
+        if not os.path.exists(submission.file_path):
+            print(f"❌ 文件不存在: {submission.file_path}")
+            submission.status = "failed"
+            submission.error_message = f"文件不存在: {submission.file_path}"
+            db.commit()
+            db.close()
             return
         
         # 1. 结构校验
         print(f"🔍 开始校验提交 {submission_id}")
-        validation_result = validation_service.validate_h5ad(submission.file_path)
+        try:
+            validation_result = validation_service.validate_h5ad(submission.file_path)
+            print(f"✅ 校验完成: {validation_result}")
+        except Exception as e:
+            print(f"❌ 校验过程出错: {e}")
+            submission.status = "failed"
+            submission.error_message = f"校验过程出错: {str(e)}"
+            db.commit()
+            db.close()
+            return
         
         if not validation_result["valid"]:
+            print(f"❌ 校验失败: {validation_result['errors']}")
             submission.status = "validation_failed"
-            submission.error_message = validation_result["errors"]
+            submission.error_message = str(validation_result["errors"])
             db.commit()
             db.close()
             return
         
         # 2. 基因映射
         print(f"🧬 开始基因映射 {submission_id}")
-        gene_mapping_result = mapping_service.map_genes(submission.file_path)
+        try:
+            gene_mapping_result = mapping_service.map_genes(submission.file_path)
+            print(f"✅ 基因映射完成: {gene_mapping_result}")
+        except Exception as e:
+            print(f"❌ 基因映射出错: {e}")
+            gene_mapping_result = {"error": str(e)}
         
         # 3. 细胞类型标准化
         print(f"🔬 开始细胞类型标准化 {submission_id}")
-        cell_type_result = mapping_service.map_cell_types(submission.file_path)
+        try:
+            cell_type_result = mapping_service.map_cell_types(submission.file_path)
+            print(f"✅ 细胞类型标准化完成: {cell_type_result}")
+        except Exception as e:
+            print(f"❌ 细胞类型标准化出错: {e}")
+            cell_type_result = {"error": str(e)}
         
         # 4. 导出结果
         print(f"📤 开始导出结果 {submission_id}")
-        export_result = export_service.export_processed_data(
-            submission_id, 
-            submission.file_path,
-            gene_mapping_result,
-            cell_type_result
-        )
+        try:
+            export_result = export_service.export_processed_data(
+                submission_id, 
+                submission.file_path,
+                gene_mapping_result,
+                cell_type_result
+            )
+            print(f"✅ 导出完成: {export_result}")
+        except Exception as e:
+            print(f"❌ 导出出错: {e}")
+            submission.status = "failed"
+            submission.error_message = f"导出过程出错: {str(e)}"
+            db.commit()
+            db.close()
+            return
         
         # 更新状态
         submission.status = "completed"
@@ -206,18 +249,25 @@ async def process_submission(submission_id: str):
         submission.export_path = export_result["export_path"]
         submission.updated_at = datetime.now()
         db.commit()
+        db.close()
         
         print(f"✅ 提交 {submission_id} 处理完成")
         
     except Exception as e:
         print(f"❌ 处理提交 {submission_id} 时出错: {str(e)}")
-        db = next(get_db())
-        submission = db.query(Submission).filter(Submission.id == submission_id).first()
-        if submission:
-            submission.status = "failed"
-            submission.error_message = str(e)
-            db.commit()
-        db.close()
+        import traceback
+        traceback.print_exc()
+        
+        try:
+            db = next(get_db())
+            submission = db.query(Submission).filter(Submission.id == submission_id).first()
+            if submission:
+                submission.status = "failed"
+                submission.error_message = str(e)
+                db.commit()
+            db.close()
+        except Exception as db_error:
+            print(f"❌ 更新数据库状态失败: {db_error}")
 
 @app.get("/")
 async def root():
