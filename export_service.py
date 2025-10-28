@@ -41,8 +41,13 @@ class ExportService:
             adata.uns['processing_info'] = {
                 'submission_id': submission_id,
                 'processed_at': datetime.now().isoformat(),
-                'gene_mapping_stats': gene_mapping_result,
-                'cell_type_mapping_stats': cell_type_mapping_result,
+                # 仅保留可序列化的统计摘要，避免将完整详情放入 uns
+                'gene_mapping_mapped': int(gene_mapping_result.get('mapped_count', 0)),
+                'gene_mapping_unmapped': int(gene_mapping_result.get('unmapped_count', 0)),
+                'gene_mapping_ambiguous': int(gene_mapping_result.get('ambiguous_count', 0)),
+                'cell_type_mapped': int(cell_type_mapping_result.get('mapped_count', 0)),
+                'cell_type_unmapped': int(cell_type_mapping_result.get('unmapped_count', 0)),
+                'cell_type_ambiguous': int(cell_type_mapping_result.get('ambiguous_count', 0)),
                 'platform_version': '1.0.0'
             }
             
@@ -116,8 +121,18 @@ class ExportService:
         
         # 添加 CL ID 列到 obs
         if 'raw_cell_type_label' in adata.obs.columns:
-            adata.obs['cl_id'] = adata.obs['raw_cell_type_label'].map(raw_to_cl)
-            adata.obs['cl_label'] = adata.obs['raw_cell_type_label'].map(raw_to_cl_label)
+            # 不覆盖已有 cl_id/cl_label
+            if 'cl_id' not in adata.obs.columns:
+                adata.obs['cl_id'] = None
+            if 'cl_label' not in adata.obs.columns:
+                adata.obs['cl_label'] = None
+            
+            new_cl = adata.obs['raw_cell_type_label'].map(raw_to_cl)
+            new_cl_label = adata.obs['raw_cell_type_label'].map(raw_to_cl_label)
+            
+            # 仅在原值为空时写入
+            adata.obs.loc[adata.obs['cl_id'].isna(), 'cl_id'] = new_cl
+            adata.obs.loc[adata.obs['cl_label'].isna(), 'cl_label'] = new_cl_label
             
             # 统计映射情况
             mapped_cells = adata.obs['cl_id'].notna().sum()

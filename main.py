@@ -95,6 +95,13 @@ async def upload_file(
         content = await file.read()
         buffer.write(content)
     
+    # 调试日志: 写入字节数与磁盘大小
+    try:
+        on_disk_size = os.path.getsize(file_path)
+        print(f"📝 上传调试: wrote_bytes={len(content)}, on_disk_size={on_disk_size}, path={file_path}")
+    except Exception as e:
+        print(f"📝 上传调试: 获取文件大小失败: {e}")
+    
     submission.file_path = file_path
     submission.status = "processing"
     db.commit()
@@ -176,6 +183,14 @@ def process_submission(submission_id: str):
             return
         
         print(f"📁 处理文件: {submission.file_path}")
+        
+        # 调试日志: 处理前检查文件存在性与大小
+        try:
+            exists = os.path.exists(submission.file_path)
+            size = os.path.getsize(submission.file_path) if exists else -1
+            print(f"📝 处理调试: exists={exists}, size={size}, path={submission.file_path}")
+        except Exception as e:
+            print(f"📝 处理调试: 检查文件失败: {e}")
         
         # 检查文件是否存在
         if not os.path.exists(submission.file_path):

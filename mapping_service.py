@@ -27,6 +27,21 @@ class MappingService:
         
         try:
             adata = sc.read_h5ad(file_path)
+            
+            # 最小改动：若已有 Ensembl 列且存在非空值，则跳过外部映射
+            if 'ensembl_gene_id' in adata.var.columns:
+                existing = int(adata.var['ensembl_gene_id'].notna().sum())
+                total = int(adata.n_vars)
+                if existing > 0:
+                    print(f"🧬 跳过外部基因映射（已有 Ensembl 覆盖 {existing}/{total}）")
+                    return {
+                        "mapped_count": existing,
+                        "unmapped_count": total - existing,
+                        "ambiguous_count": 0,
+                        "mapping_details": [],
+                        "note": "skipped_external_mapping_existing_ensembl"
+                    }
+            
             mapping_details = []
             mapped_count = 0
             unmapped_count = 0
@@ -167,6 +182,21 @@ class MappingService:
         
         try:
             adata = sc.read_h5ad(file_path)
+            
+            # 最小改动：若已有 CL 列且存在非空值，则跳过外部映射
+            if 'cl_id' in adata.obs.columns:
+                existing = int(adata.obs['cl_id'].notna().sum())
+                total = int(adata.n_obs)
+                if existing > 0:
+                    print(f"🔬 跳过外部细胞类型映射（已有 CL 覆盖 {existing}/{total}）")
+                    return {
+                        "mapped_count": existing,
+                        "unmapped_count": total - existing,
+                        "ambiguous_count": 0,
+                        "mapping_details": [],
+                        "note": "skipped_external_mapping_existing_cl"
+                    }
+            
             mapping_details = []
             mapped_count = 0
             unmapped_count = 0

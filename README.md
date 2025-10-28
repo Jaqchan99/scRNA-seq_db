@@ -27,15 +27,39 @@
 pip install -r requirements.txt
 ```
 
-### 2. 启动服务
+### 2. 启动平台（推荐）
+
+使用一键启动脚本，同时启动后端API和前端界面：
 
 ```bash
-python main.py
+python start_platform.py
 ```
 
-服务将在 `http://localhost:8000` 启动。
+这将启动：
+- 后端API服务：`http://localhost:8000`
+- 前端界面：`http://localhost:6666`
 
-### 3. 使用 API
+### 3. 手动启动
+
+如果需要分别启动：
+
+```bash
+# 启动后端API服务
+python main.py
+
+# 在另一个终端启动前端（可选）
+cd frontend
+python -m http.server 6666
+```
+
+### 4. 使用平台
+
+#### 通过Web界面（推荐）
+1. 打开浏览器访问 `http://localhost:6666`
+2. 按照界面提示上传 .h5ad 文件
+3. 等待处理完成并下载结果
+
+#### 使用 API
 
 #### 创建提交任务
 ```bash
@@ -188,7 +212,13 @@ curl "http://localhost:8000/submissions/{submission_id}/export" -o processed_dat
 ├── validation_service.py  # 数据校验服务
 ├── mapping_service.py     # 基因和细胞类型映射服务
 ├── export_service.py      # 数据导出服务
+├── start_platform.py     # 一键启动脚本
 ├── requirements.txt       # 依赖包
+├── frontend/              # 前端界面
+│   ├── index.html        # 主页面
+│   ├── style.css         # 样式文件
+│   ├── script.js         # JavaScript逻辑
+│   └── README.md         # 前端说明
 └── README.md             # 说明文档
 ```
 

@@ -36,6 +36,13 @@ class ValidationService:
                 errors.append(f"无法读取 h5ad 文件: {str(e)}")
                 return {"valid": False, "errors": errors, "warnings": warnings, "metadata": metadata}
             
+            # 调试日志: 打印文件大小与 AnnData 形状
+            try:
+                file_size = os.path.getsize(file_path)
+                print(f"📝 校验调试: size={file_size}, n_obs={adata.n_obs}, n_vars={adata.n_vars}, path={file_path}")
+            except Exception as e:
+                print(f"📝 校验调试: 获取文件信息失败: {e}")
+            
             # 基本结构检查
             if adata.n_obs == 0:
                 errors.append("表达矩阵中没有细胞数据")
@@ -82,10 +89,18 @@ class ValidationService:
                 if hasattr(adata.X, 'nnz'):
                     metadata['sparsity'] = 1 - (adata.X.nnz / (adata.n_obs * adata.n_vars))
                 
-                # 检查是否有负值
-                if hasattr(adata.X, 'data'):
-                    if np.any(adata.X.data < 0):
-                        warnings.append("表达矩阵包含负值")
+                # 检查是否有负值（区分稀疏/稠密）
+                try:
+                    from scipy import sparse as _sp
+                    if _sp.issparse(adata.X):
+                        if np.any(adata.X.data < 0):
+                            warnings.append("表达矩阵包含负值")
+                    else:
+                        X_dense = np.asarray(adata.X)
+                        if np.any(X_dense < 0):
+                            warnings.append("表达矩阵包含负值")
+                except Exception as _e:
+                    print(f"📝 校验调试: 负值检查跳过: {_e}")
             
             # 检查全局元数据
             if hasattr(adata, 'uns') and adata.uns:

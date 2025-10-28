@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>scRNA-seq 数据处理平台</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="header">
+            <h1>scRNA-seq 数据处理平台</h1>
+            <p>单细胞RNA测序数据标准化与前置处理</p>
+        </header>
+
+        <!-- 步骤指示器 -->
+        <div class="step-indicator">
+            <div class="step active" id="step-1">
+                <div class="step-number">1</div>
+                <div class="step-label">上传数据</div>
+            </div>
+            <div class="step" id="step-2">
+                <div class="step-number">2</div>
+                <div class="step-label">数据校验</div>
+            </div>
+            <div class="step" id="step-3">
+                <div class="step-number">3</div>
+                <div class="step-label">基因映射</div>
+            </div>
+            <div class="step" id="step-4">
+                <div class="step-number">4</div>
+                <div class="step-label">结果展示</div>
+            </div>
+        </div>
+
+        <!-- 主要内容区域 -->
+        <main class="main-content">
+            <!-- 步骤1: 上传数据 -->
+            <div class="step-content active" id="content-1">
+                <h2>上传 h5ad 文件</h2>
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📁</div>
+                    <p>拖拽文件到此处或点击选择文件</p>
+                    <p class="upload-hint">仅支持 .h5ad 格式文件</p>
+                    <input type="file" id="fileInput" accept=".h5ad" style="display: none;">
+                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                        选择文件
+                    </button>
+                </div>
+                <div class="file-info" id="fileInfo" style="display: none;">
+                    <h3>文件信息</h3>
+                    <div class="info-item">
+                        <span class="label">文件名:</span>
+                        <span class="value" id="fileName"></span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">文件大小:</span>
+                        <span class="value" id="fileSize"></span>
+                    </div>
+                    <button class="btn btn-success" id="uploadBtn" disabled>开始上传</button>
+                </div>
+            </div>
+
+            <!-- 步骤2: 数据校验 -->
+            <div class="step-content" id="content-2">
+                <h2>数据校验</h2>
+                <div class="validation-status" id="validationStatus">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>正在校验数据...</p>
+                    </div>
+                </div>
+                <div class="validation-results" id="validationResults" style="display: none;">
+                    <h3>校验结果</h3>
+                    <div class="result-summary" id="resultSummary"></div>
+                    <div class="result-details" id="resultDetails"></div>
+                </div>
+            </div>
+
+            <!-- 步骤3: 基因映射 -->
+            <div class="step-content" id="content-3">
+                <h2>基因映射与细胞类型标准化</h2>
+                <div class="mapping-status" id="mappingStatus">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>正在进行基因映射和细胞类型标准化...</p>
+                    </div>
+                </div>
+                <div class="mapping-results" id="mappingResults" style="display: none;">
+                    <h3>映射结果</h3>
+                    <div class="mapping-summary" id="mappingSummary"></div>
+                    <div class="mapping-details" id="mappingDetails"></div>
+                </div>
+            </div>
+
+            <!-- 步骤4: 结果展示 -->
+            <div class="step-content" id="content-4">
+                <h2>处理结果</h2>
+                <div class="results-container" id="resultsContainer">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>正在生成处理结果...</p>
+                    </div>
+                </div>
+                <div class="final-results" id="finalResults" style="display: none;">
+                    <h3>处理完成</h3>
+                    <div class="result-summary" id="finalSummary"></div>
+                    <div class="download-section">
+                        <h4>下载结果</h4>
+                        <div class="download-buttons">
+                            <button class="btn btn-primary" id="downloadReport">下载处理报告</button>
+                            <button class="btn btn-success" id="downloadData">下载处理数据</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 状态栏 -->
+        <footer class="status-bar">
+            <div class="status-info">
+                <span id="currentStatus">准备就绪</span>
+            </div>
+            <div class="status-actions">
+                <button class="btn btn-secondary" id="resetBtn" style="display: none;">重新开始</button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 错误模态框 -->
+    <div class="modal" id="errorModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>处理错误</h3>
+                <button class="close-btn" onclick="closeErrorModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="errorMessage"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeErrorModal()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
