@@ -1,0 +1,238 @@
+import os 
+import numpy as np
+import pandas as pd
+import anndata as ad
+import pickle as pkl
+import glob
+import logging
+import argparse
+import random
+from concurrent.futures import ProcessPoolExecutor
+import tempfile
+import shutil
+import functools  # 新增：导入functools
+
+# 配置日志（多进程兼容版）
+def setup_logger():
+    logger = logging.getLogger(__name__)
+    if not logger.handlers:  # 避免重复添加处理器
+        logger.setLevel(logging.DEBUG)
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+        logger.addHandler(console_handler)
+    return logger
+
+logger = setup_logger()
+
+# 解析命令行参数（修改为parse_known_args，忽略Jupyter的额外参数）
+parser = argparse.ArgumentParser()
+parser.add_argument('--id_convert_fp', type=str, default='./normalized_geneName_dict_gaogeScp.csv')
+parser.add_argument('--h5ad_dir', type=str, default='./')
+parser.add_argument('--output_dir', type=str, default='./data_id2sym')
+parser.add_argument('--gtf_fp', type=str, default='./gtfM1-M35.csv')
+args, unknown = parser.parse_known_args()  # 关键：使用parse_known_args
+
+# 提前创建输出目录
+os.makedirs(args.output_dir, exist_ok=True)
+
+# 加载全局数据
+def load_global_data(id_convert_fp, gtf_fp):
+    """加载全局数据，返回处理后的DataFrame"""
+    id_convert = pd.read_csv(id_convert_fp, index_col=0)
+    gtfM1_M35 = pd.read_csv(gtf_fp, index_col=0)
+    # 检查gtfM32是否为空
+    gtfM32 = gtfM1_M35[gtfM1_M35['dataset'] == 'gencode.vM32']
+    if gtfM32.empty:
+        logger.warning("gtfM32 is empty! No rows with dataset='gencode.vM32'")
+    return id_convert, gtfM1_M35, gtfM32
+
+# ====== 补充缺失的代码：定义临时目录和保存大DataFrame的函数 ======
+# 全局临时目录（用于存储大DataFrame的临时文件）
+temp_dir = tempfile.mkdtemp()
+
+def save_large_data_to_temp(id_convert, gtfM1_M35, gtfM32):
+    """将大DataFrame保存为临时parquet文件（比csv更快，支持索引）"""
+    id_convert_fp = os.path.join(temp_dir, "id_convert.parquet")
+    gtfM1_M35_fp = os.path.join(temp_dir, "gtfM1_M35.parquet")
+    gtfM32_fp = os.path.join(temp_dir, "gtfM32.parquet")
+    # 保存为parquet（需要安装pyarrow：pip install pyarrow）
+    id_convert.to_parquet(id_convert_fp)
+    gtfM1_M35.to_parquet(gtfM1_M35_fp)
+    gtfM32.to_parquet(gtfM32_fp)
+    return id_convert_fp, gtfM1_M35_fp, gtfM32_fp
+
+# 加载数据并生成临时文件路径（这一步定义了缺失的三个变量）
+id_convert, gtfM1_M35, gtfM32 = load_global_data(args.id_convert_fp, args.gtf_fp)
+# ====== 关键：生成id_convert_fp等变量 ======
+id_convert_fp, gtfM1_M35_fp, gtfM32_fp = save_large_data_to_temp(id_convert, gtfM1_M35, gtfM32)
+
+# 转换ens ID 到 symbol（修改后，添加了统计逻辑，参数为文件路径）
+def ID2symbol(h5ad_fp, save_dir, id_convert_fp, gtfM32_fp, gtfM1_M35_fp):
+    """
+    处理单个h5ad文件的基因名称转换，包含映射成功率统计
+    """
+    logger = setup_logger()
+    try:
+        # 子进程中重新读取大DataFrame
+        id_convert = pd.read_parquet(id_convert_fp)
+        gtfM32 = pd.read_parquet(gtfM32_fp)
+        gtfM1_M35 = pd.read_parquet(gtfM1_M35_fp)
+        
+        adata = ad.read_h5ad(h5ad_fp)
+        # 新增：保存原始基因数量
+        total_genes = len(adata.var_names)
+        # 新增：保存原始基因名到var列
+        adata.var['original_gene_name'] = adata.var_names
+        var_names = adata.var_names.values
+
+        # 新建 id_convert_, 把 @ 项展开：
+        id_convert_ = id_convert.reset_index()
+        id_convert_.columns = ['gene_name', 'alignment']
+        id_convert_['alignment'] = id_convert_['alignment'].str.split('@')
+        id_convert_ = id_convert_.explode('alignment').reset_index(drop=True)
+
+        # 把symbol name 转化为 gene ID
+        var_name_ = pd.DataFrame(var_names, columns=['gene_name'])
+        var_name_ = pd.merge(var_name_, id_convert_, how='left', on='gene_name')
+        var_name_['alignment'] = var_name_['alignment'].fillna(var_name_['gene_name'])
+
+        # 与 gtfM32 合并：
+        gene_id_M32 = pd.merge(var_name_, gtfM32, how='left', on='alignment').fillna('UNKNOWN')
+
+        # 按 gene_name_x 折叠
+        gene_id_M32_ = gene_id_M32.groupby('gene_name_x').agg({
+            'alignment': lambda x: list(x),
+            'gene_name_y': lambda x: list(x)
+        }).reset_index()
+
+        # 移除gene_name_y中的UNKNOWN
+        gene_id_M32_['gene_name_y'] = gene_id_M32_['gene_name_y'].apply(
+            lambda x: [item for item in x if item != 'UNKNOWN']
+        )
+
+        # 第一步：确定初始的gene_name（处理列表类型）
+        def get_initial_gene_name(row):
+            """根据条件返回初始的基因名称列表/字符串"""
+            if row['gene_name_x'] in row['gene_name_y']:
+                return [row['gene_name_x']]
+            else:
+                return row['gene_name_y'] if row['gene_name_y'] else [row['gene_name_x']]  # 空列表则用原名称
+
+        gene_id_M32_['gene_name'] = gene_id_M32_.apply(get_initial_gene_name, axis=1)
+
+        # 处理多symbol或无symbol的情况（修复类型错误）
+        def process_gene_name(row):
+            """统一gene_name的类型为字符串"""
+            gene_name_list = row['gene_name']
+            # 情况1：列表长度为1，取唯一元素
+            if len(gene_name_list) == 1:
+                return gene_name_list[0]
+            # 情况2：列表长度>1，设为UNKNOWN（或根据需求调整）
+            else:
+                return row['gene_name_x']  # 用原名称替代
+
+        gene_id_M32_['gene_name'] = gene_id_M32_.apply(process_gene_name, axis=1)
+
+        # 重新索引并获取新的var名称
+        results = gene_id_M32_.set_index('gene_name_x').reindex(var_names)['gene_name']
+        # 处理可能的NaN（理论上不会出现，做兜底）
+        new_var_names = results.fillna('UNKNOWN').values
+
+        # ====== 核心：统计映射成功率 ======
+        # 定义“成功映射”：结果不是UNKNOWN、不是原始名（可根据你的需求调整定义）
+        # 先创建原始名和映射名的对照
+        gene_mapping = pd.DataFrame({
+            'original': var_names,
+            'mapped': new_var_names
+        })
+        # 条件1：映射结果不是UNKNOWN
+        condition1 = gene_mapping['mapped'] != 'UNKNOWN'
+        # 条件2：映射结果不是原始名（可选，根据你的需求决定是否保留）
+        condition2 = gene_mapping['mapped'] != gene_mapping['original']
+        # 成功映射的基因数量（可选择只用condition1，或condition1&condition2）
+        success_genes = gene_mapping[condition1].shape[0]  # 这里用了宽松版，可改为condition1&condition2
+        # 映射成功率
+        success_rate = (success_genes / total_genes) * 100
+
+        # 可选：如果你还想统计有多少基因发生了“改名”
+        renamed_count = gene_mapping[
+            (gene_mapping['mapped'] != 'UNKNOWN') & 
+            (gene_mapping['mapped'] != gene_mapping['original'])
+        ].shape[0]
+        rename_rate=(renamed_count/ total_genes)*100
+        
+#         logger.info(f"Total Genes: {total_genes}")
+        logger.info(f"Valid Mapped Genes (Coverage): {success_genes} ({success_rate:.2f}%)")
+        logger.info(f"Renamed Genes: {renamed_count}")
+        logger.info(f"Renamed Percentage: {rename_rate:.2f}%")
+        
+        # 更新adata的var名称并保存
+        adata.var_names = new_var_names
+        adata.var_names_make_unique()
+        save_path = os.path.join(save_dir, os.path.basename(h5ad_fp))
+        adata.write_h5ad(save_path)
+
+        # 输出统计信息
+        logger.info(f"文件 {os.path.basename(h5ad_fp)} 统计：")
+        logger.info(f"总基因数：{total_genes}")
+        logger.info(f"成功映射数：{success_genes}")
+        logger.info(f"映射成功率：{success_rate:.2f}%")
+        logger.info(f"{'#'*50}")
+
+        # 返回统计结果，便于后续汇总
+        return {
+            'file': os.path.basename(h5ad_fp),
+            'total': total_genes,
+            'success': success_genes,
+            'success_rate': success_rate
+        }
+    except Exception as e:
+        logger.error(f"处理 {h5ad_fp} 时出错：{str(e)}", exc_info=True)
+        return {
+            'file': os.path.basename(h5ad_fp),
+            'total': 0,
+            'success': 0,
+            'success_rate': 0.0
+        }
+
+if __name__ == '__main__':
+    h5ad_fps = glob.glob(os.path.join(args.h5ad_dir, "*.h5ad"))
+    if not h5ad_fps:
+        logger.warning("未找到.h5ad文件！")
+    else:
+        # ====== 修复：使用functools.partial传递参数 ======
+        partial_id2symbol = functools.partial(
+            ID2symbol,
+            save_dir=args.output_dir,
+            id_convert_fp=id_convert_fp,
+            gtfM32_fp=gtfM32_fp,
+            gtfM1_M35_fp=gtfM1_M35_fp
+        )
+#         单进程（调试用，推荐先运行单进程）
+        stats_list = []
+        for fp in h5ad_fps:
+            stat = partial_id2symbol(fp)
+            stats_list.append(stat)
+#         
+#         多进程（若需启用，注释掉单进程，取消注释以下代码）
+#         max_workers = max(1, os.cpu_count() // 2)
+#         with ProcessPoolExecutor(max_workers=max_workers) as executor:
+#             stats_list = list(executor.map(partial_id2symbol, h5ad_fps))
+
+        # ====== 汇总所有文件的统计 ======
+        total_all = sum([stat['total'] for stat in stats_list])
+        success_all = sum([stat['success'] for stat in stats_list])
+        overall_success_rate = (success_all / total_all) * 100 if total_all > 0 else 0.0
+
+        logger.info(f"\n====== 所有文件汇总统计 ======")
+        logger.info(f"总基因数（所有文件）：{total_all}")
+        logger.info(f"成功映射数（所有文件）：{success_all}")
+        logger.info(f"整体映射成功率：{overall_success_rate:.2f}%")
+
+        # （可选）将统计结果保存为csv文件
+        stats_df = pd.DataFrame(stats_list)
+        stats_df.to_csv(os.path.join(args.output_dir, "mapping_stats.csv"), index=False)
+        logger.info(f"统计结果已保存到：{os.path.join(args.output_dir, 'mapping_stats.csv')}")
+
+        # 清理临时文件（重要：避免残留临时文件）
+        shutil.rmtree(temp_dir)

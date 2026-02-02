@@ -1,145 +1,161 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>scRNA-seq 数据处理平台</title>
+    <title>scRNA-seq Data Processing Platform</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <!-- 头部 -->
+        <!-- Header -->
         <header class="header">
-            <h1>scRNA-seq 数据处理平台</h1>
-            <p>单细胞RNA测序数据标准化与前置处理</p>
+            <h1>scRNA-seq Data Processing Platform</h1>
+            <p>Standardization and Preprocessing of Single-cell RNA Sequencing Data</p>
         </header>
 
-        <!-- 步骤指示器 -->
+        <!-- Step Indicator -->
         <div class="step-indicator">
             <div class="step active" id="step-1">
                 <div class="step-number">1</div>
-                <div class="step-label">上传数据</div>
+                <div class="step-label">Upload Data</div>
             </div>
             <div class="step" id="step-2">
                 <div class="step-number">2</div>
-                <div class="step-label">数据校验</div>
+                <div class="step-label">Validation</div>
             </div>
             <div class="step" id="step-3">
                 <div class="step-number">3</div>
-                <div class="step-label">基因映射</div>
+                <div class="step-label">Gene Mapping</div>
             </div>
             <div class="step" id="step-4">
                 <div class="step-number">4</div>
-                <div class="step-label">结果展示</div>
+                <div class="step-label">Results</div>
             </div>
         </div>
 
-        <!-- 主要内容区域 -->
+        <!-- Main Content -->
         <main class="main-content">
-            <!-- 步骤1: 上传数据 -->
+            <!-- Step 1: Upload Data -->
             <div class="step-content active" id="content-1">
-                <h2>上传 h5ad 文件</h2>
+                <h2>Upload h5ad File</h2>
                 <div class="upload-area" id="uploadArea">
                     <div class="upload-icon">📁</div>
-                    <p>拖拽文件到此处或点击选择文件</p>
-                    <p class="upload-hint">仅支持 .h5ad 格式文件</p>
+                    <p>Drag and drop file here or click to select</p>
+                    <p class="upload-hint">Only .h5ad format files are supported</p>
                     <input type="file" id="fileInput" accept=".h5ad" style="display: none;">
                     <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                        选择文件
+                        Select File
                     </button>
                 </div>
                 <div class="file-info" id="fileInfo" style="display: none;">
-                    <h3>文件信息</h3>
+                    <h3>File Information</h3>
                     <div class="info-item">
-                        <span class="label">文件名:</span>
+                        <span class="label">File Name:</span>
                         <span class="value" id="fileName"></span>
                     </div>
                     <div class="info-item">
-                        <span class="label">文件大小:</span>
+                        <span class="label">File Size:</span>
                         <span class="value" id="fileSize"></span>
                     </div>
-                    <button class="btn btn-success" id="uploadBtn" disabled>开始上传</button>
+                    <button class="btn btn-success" id="uploadBtn" disabled>Start Upload</button>
                 </div>
             </div>
 
-            <!-- 步骤2: 数据校验 -->
+            <!-- Step 2: Data Validation -->
             <div class="step-content" id="content-2">
-                <h2>数据校验</h2>
+                <h2>Data Validation</h2>
                 <div class="validation-status" id="validationStatus">
                     <div class="loading">
                         <div class="spinner"></div>
-                        <p>正在校验数据...</p>
+                        <p>Validating data...</p>
                     </div>
                 </div>
                 <div class="validation-results" id="validationResults" style="display: none;">
-                    <h3>校验结果</h3>
+                    <h3>Validation Results</h3>
                     <div class="result-summary" id="resultSummary"></div>
                     <div class="result-details" id="resultDetails"></div>
+                    <div class="confirmation-area" id="validationConfirmation" style="display: none;">
+                        <h4>Validation Completed</h4>
+                        <p>Please review the validation results above. If validation passed, you can proceed to the next step.</p>
+                        <div class="confirmation-buttons">
+                            <button class="btn btn-success" id="continueToMapping">Continue: Gene Mapping</button>
+                            <button class="btn btn-secondary" id="cancelProcess">Cancel Processing</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- 步骤3: 基因映射 -->
+            <!-- Step 3: Gene Mapping -->
             <div class="step-content" id="content-3">
-                <h2>基因映射与细胞类型标准化</h2>
+                <h2>Gene Mapping & Cell Type Standardization</h2>
                 <div class="mapping-status" id="mappingStatus">
                     <div class="loading">
                         <div class="spinner"></div>
-                        <p>正在进行基因映射和细胞类型标准化...</p>
+                        <p>Performing gene mapping and cell type standardization...</p>
                     </div>
                 </div>
                 <div class="mapping-results" id="mappingResults" style="display: none;">
-                    <h3>映射结果</h3>
+                    <h3>Mapping Results</h3>
                     <div class="mapping-summary" id="mappingSummary"></div>
                     <div class="mapping-details" id="mappingDetails"></div>
+                    <div class="confirmation-area" id="mappingConfirmation" style="display: none;">
+                        <h4>Mapping Completed</h4>
+                        <p>Please review the mapping results above. If everything looks correct, you can proceed to export the final results.</p>
+                        <div class="confirmation-buttons">
+                            <button class="btn btn-success" id="continueToExport">Continue: Export Results</button>
+                            <button class="btn btn-secondary" id="cancelProcess2">Cancel Processing</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- 步骤4: 结果展示 -->
+            <!-- Step 4: Results -->
             <div class="step-content" id="content-4">
-                <h2>处理结果</h2>
+                <h2>Processing Results</h2>
                 <div class="results-container" id="resultsContainer">
                     <div class="loading">
                         <div class="spinner"></div>
-                        <p>正在生成处理结果...</p>
+                        <p>Generating results...</p>
                     </div>
                 </div>
                 <div class="final-results" id="finalResults" style="display: none;">
-                    <h3>处理完成</h3>
+                    <h3>Processing Completed</h3>
                     <div class="result-summary" id="finalSummary"></div>
                     <div class="download-section">
-                        <h4>下载结果</h4>
+                        <h4>Download Results</h4>
                         <div class="download-buttons">
-                            <button class="btn btn-primary" id="downloadReport">下载处理报告</button>
-                            <button class="btn btn-success" id="downloadData">下载处理数据</button>
+                            <button class="btn btn-primary" id="downloadReport">Download Processing Report</button>
+                            <button class="btn btn-success" id="downloadData">Download Processed Data</button>
                         </div>
                     </div>
                 </div>
             </div>
         </main>
 
-        <!-- 状态栏 -->
+        <!-- Status Bar -->
         <footer class="status-bar">
             <div class="status-info">
-                <span id="currentStatus">准备就绪</span>
+                <span id="currentStatus">Ready</span>
             </div>
             <div class="status-actions">
-                <button class="btn btn-secondary" id="resetBtn" style="display: none;">重新开始</button>
+                <button class="btn btn-secondary" id="resetBtn" style="display: none;">Start Over</button>
             </div>
         </footer>
     </div>
 
-    <!-- 错误模态框 -->
+    <!-- Error Modal -->
     <div class="modal" id="errorModal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>处理错误</h3>
+                <h3>Processing Error</h3>
                 <button class="close-btn" onclick="closeErrorModal()">&times;</button>
             </div>
             <div class="modal-body">
                 <p id="errorMessage"></p>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-primary" onclick="closeErrorModal()">确定</button>
+                <button class="btn btn-primary" onclick="closeErrorModal()">OK</button>
             </div>
         </div>
     </div>

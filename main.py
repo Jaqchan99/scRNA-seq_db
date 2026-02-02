@@ -107,13 +107,15 @@ async def upload_file(
     db.commit()
     db.close()
     
-    # 后台处理
-    background_tasks.add_task(process_submission, submission_id)
+    # 不再自动处理，等待用户触发
+    submission.status = "uploaded"
+    db.commit()
+    db.close()
     
     return {
         "submission_id": submission_id,
-        "status": "processing",
-        "message": "文件上传成功，正在处理中..."
+        "status": "uploaded",
+        "message": "文件上传成功，请开始校验"
     }
 
 @app.get("/submissions/{submission_id}/status")
@@ -169,6 +171,153 @@ async def get_export(submission_id: str):
         media_type="application/octet-stream",
         filename=f"processed_{submission_id}.h5ad"
     )
+
+@app.post("/submissions/{submission_id}/validate")
+async def validate_submission(submission_id: str, background_tasks: BackgroundTasks):
+    """执行数据校验"""
+    db = next(get_db())
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="提交任务不存在")
+    
+    submission.status = "validating"
+    db.commit()
+    db.close()
+    
+    background_tasks.add_task(process_validation, submission_id)
+    
+    return {"status": "validating", "message": "开始数据校验"}
+
+@app.post("/submissions/{submission_id}/continue")
+async def continue_processing(submission_id: str, background_tasks: BackgroundTasks):
+    """继续处理（执行映射和导出）"""
+    db = next(get_db())
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="提交任务不存在")
+    
+    if submission.status != "validated":
+        raise HTTPException(status_code=400, detail="请先完成数据校验")
+    
+    submission.status = "mapping"
+    db.commit()
+    db.close()
+    
+    background_tasks.add_task(process_mapping_and_export, submission_id)
+    
+    return {"status": "mapping", "message": "开始基因映射和细胞类型标准化"}
+
+def process_validation(submission_id: str):
+    """只执行数据校验"""
+    print(f"🔍 开始校验提交 {submission_id}")
+    
+    try:
+        db = next(get_db())
+        submission = db.query(Submission).filter(Submission.id == submission_id).first()
+        
+        if not submission:
+            return
+        
+        if not os.path.exists(submission.file_path):
+            submission.status = "failed"
+            submission.error_message = f"文件不存在: {submission.file_path}"
+            db.commit()
+            db.close()
+            return
+        
+        # 执行校验
+        validation_result = validation_service.validate_h5ad(submission.file_path)
+        
+        if not validation_result["valid"]:
+            submission.status = "validation_failed"
+            submission.error_message = str(validation_result["errors"])
+            db.commit()
+            db.close()
+            return
+        
+        # 保存校验结果到临时文件
+        import json
+        validation_report_path = f"reports/validation_{submission_id}.json"
+        os.makedirs("reports", exist_ok=True)
+        with open(validation_report_path, 'w') as f:
+            json.dump({
+                "validation_result": validation_result,
+                "summary": validation_result.get("metadata", {})
+            }, f, indent=2, ensure_ascii=False)
+        
+        submission.status = "validated"
+        submission.report_path = validation_report_path
+        db.commit()
+        db.close()
+        
+        print(f"✅ 校验完成: {submission_id}")
+        
+    except Exception as e:
+        print(f"❌ 校验出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        try:
+            db = next(get_db())
+            submission = db.query(Submission).filter(Submission.id == submission_id).first()
+            if submission:
+                submission.status = "failed"
+                submission.error_message = str(e)
+                db.commit()
+            db.close()
+        except:
+            pass
+
+def process_mapping_and_export(submission_id: str):
+    """执行映射和导出"""
+    print(f"🧬 开始映射和导出 {submission_id}")
+    
+    try:
+        db = next(get_db())
+        submission = db.query(Submission).filter(Submission.id == submission_id).first()
+        
+        if not submission:
+            return
+        
+        # 基因映射
+        print(f"🧬 开始基因映射 {submission_id}")
+        gene_mapping_result = mapping_service.map_genes(submission.file_path)
+        
+        # 细胞类型映射
+        print(f"🔬 开始细胞类型标准化 {submission_id}")
+        cell_type_result = mapping_service.map_cell_types(submission.file_path)
+        
+        # 导出结果
+        print(f"📤 开始导出结果 {submission_id}")
+        export_result = export_service.export_processed_data(
+            submission_id, 
+            submission.file_path,
+            gene_mapping_result,
+            cell_type_result
+        )
+        
+        submission.status = "completed"
+        submission.report_path = export_result["report_path"]
+        submission.export_path = export_result["export_path"]
+        submission.updated_at = datetime.now()
+        db.commit()
+        db.close()
+        
+        print(f"✅ 处理完成: {submission_id}")
+        
+    except Exception as e:
+        print(f"❌ 处理出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        try:
+            db = next(get_db())
+            submission = db.query(Submission).filter(Submission.id == submission_id).first()
+            if submission:
+                submission.status = "failed"
+                submission.error_message = str(e)
+                db.commit()
+            db.close()
+        except:
+            pass
 
 def process_submission(submission_id: str):
     """后台处理提交的数据"""
