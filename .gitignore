@@ -70,6 +70,9 @@ tmp/
 
 /Zilionis_mouse_lung.h5ad
 
+# Cell Ontology OBO source (large; download locally for parse_cl_obo.py)
+cell_type_mapping/cl.obo
+
 # Local / pipeline outputs (do not publish)
 data/
 results/
