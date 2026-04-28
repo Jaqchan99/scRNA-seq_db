@@ -69,3 +69,23 @@ temp/
 tmp/
 
 /Zilionis_mouse_lung.h5ad
+
+# Local / pipeline outputs (do not publish)
+data/
+results/
+configs/
+manuscript/
+cell type annotation/
+
+# Internal drafts & notes (not for public repo)
+v1.txt
+汇报材料*.md
+基因映射算法分析.md
+
+# Lookup table / CSV backups
+cell_type_mapping/*.bak*
+*.bak_*
+
+# IDE / misc
+.cursor/
+新建文件夹/

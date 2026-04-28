@@ -1,250 +1,166 @@
-<<<<<<< HEAD
-# scRNA-seq Data Processing Platform
+# scRNA-seq Data Preprocessing and Standardisation Platform
 
-一个用于单细胞RNA测序数据标准化与前置处理的平台，支持数据入库前的准备和审核。
+A modular platform for standardising single-cell RNA sequencing (scRNA-seq) datasets prior to downstream quality control and analysis. The system performs automated structural validation, gene identifier normalisation, and cell type ontology alignment — all entirely offline using curated local reference tables.
 
-## 功能特性
+## Key Results
 
-- 🧬 **基因名称对齐**: 使用 mygene.info API 将基因符号统一转换为 Ensembl ID
-- 🔬 **细胞类型标准化**: 使用 Zooma API 将细胞类型标签映射到 CL Ontology
-- 📊 **数据校验**: 结构化和语义校验，确保数据质量
-- 📤 **结果导出**: 生成标准化的 metadata 和表达矩阵
-- 📋 **详细报告**: JSON + TSV 格式的处理报告
+| Metric | Local (ours) | ZOOMA |
+|---|---|---|
+| **Coverage (Label)** | **100.0%** | 33.64% |
+| **Accuracy (Label)** | **97.40%** | 25.28% |
+| **Precision (Label)** | 97.40% | 75.14% |
+| Accuracy (Cell-weighted) | **98.36%** | 20.62% |
+| Benchmark | 538 labels, 56 datasets, 1,072,736 cells | same |
 
-## 技术栈
+> External validation on held-out GSE166504 (12 cell types): 83.33% accuracy (ours) vs. 41.7% (ZOOMA)
 
-- **后端**: FastAPI + SQLite
-- **数据处理**: scanpy + pandas + numpy
-- **基因映射**: mygene.info API
-- **细胞类型映射**: Zooma API
-- **文件格式**: h5ad (AnnData)
+## Features
 
-## 快速开始
+- **Gene Name Alignment**: Offline normalisation to GENCODE M32 using local conversion tables (95%+ mapping rate)
+- **Cell Type Standardisation**: Two-stage local algorithm (exact match + fuzzy match) mapping free-text labels to Cell Ontology (CL) terms
+- **Structural Validation**: Schema checking, integrity verification, biological plausibility checks
+- **Incremental Update SOP**: Semi-automated pipeline to expand the lookup table with new datasets, with before/after evaluation
+- **Reproducible Reporting**: JSON + TSV audit trails for all transformations
 
-### 1. 安装依赖
+## Tech Stack
+
+- **Backend**: FastAPI + SQLite
+- **Data Processing**: scanpy + pandas + numpy + anndata
+- **Gene Mapping**: Local reference tables (id_convert + GTF M32) — no network dependency
+- **Cell Type Mapping**: Local Cell Ontology synonym table (3,240 CL entries, 6,120+ synonyms) — no network dependency
+- **Frontend**: Vanilla HTML/CSS/JS (lightweight, no framework dependency)
+- **File Format**: h5ad (AnnData)
+
+## Project Structure
+
+```
+data_platform/
+├── src/                          # Core backend modules
+│   ├── main.py                   # FastAPI application entry point
+│   ├── database.py               # SQLite database configuration
+│   ├── models.py                 # Pydantic data models
+│   ├── upload_service.py         # File ingestion and integrity checks
+│   ├── validation_service.py     # Structural and semantic validation
+│   ├── mapping_service.py        # Gene + cell type mapping algorithms
+│   ├── export_service.py         # Standardised output generation
+│   ├── read_h5ad.py              # h5ad file inspection utilities
+│   └── check_database.py         # Database inspection utilities
+├── scripts/                      # Evaluation and utility scripts
+│   ├── incremental_update_sop.py # Incremental update orchestration
+│   ├── evaluate_mapping.py       # Benchmark evaluation (local + ZOOMA)
+│   ├── extract_benchmark_labels.py
+│   ├── batch_inspect.py          # Dataset inspection and config generation
+│   ├── merge_lookup_table.py     # Lookup table merge utility
+│   ├── fix_lookup_errors.py      # Error correction utility
+│   └── ...
+├── cell_type_mapping/            # Cell Ontology reference data
+│   ├── cell_type_mapping.csv     # Parsed CL synonym table (3,240 entries)
+│   └── parse_cl_obo.py           # OBO → CSV parser
+├── data/                         # (local, gitignored) raw references, h5ad, benchmarks
+├── configs/                      # (local, gitignored) batch_inspect / SOP configs
+├── results/                      # (local, gitignored) eval outputs, logs, coverage
+├── frontend/                     # Web frontend
+│   ├── index.html
+│   ├── style.css
+│   └── script.js
+├── 使用说明.md                   # Chinese usage guide
+├── requirements.txt
+└── README.md
+```
+
+## Quick Start
+
+### 1. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 启动平台（推荐）
-
-使用一键启动脚本，同时启动后端API和前端界面：
+### 2. Launch Platform (Recommended)
 
 ```bash
-python start_platform.py
+python scripts/start_platform.py
 ```
 
-这将启动：
-- 后端API服务：`http://localhost:8000`
-- 前端界面：`http://localhost:6666`
+This starts:
+- Backend API: `http://localhost:8100`
+- Frontend: `http://localhost:8080` (default; if the port is busy, the launcher may pick another — check the terminal output)
 
-### 3. 手动启动
-
-如果需要分别启动：
+### 3. Manual Start
 
 ```bash
-# 启动后端API服务
-python main.py
+# Start backend
+python src/main.py
 
-# 在另一个终端启动前端（可选）
-cd frontend
-python -m http.server 6666
+# In another terminal, start frontend
+cd frontend && python -m http.server 6666
 ```
 
-### 4. 使用平台
+### 4. Usage
 
-#### 通过Web界面（推荐）
-1. 打开浏览器访问 `http://localhost:6666`
-2. 按照界面提示上传 .h5ad 文件
-3. 等待处理完成并下载结果
+**Web Interface**: Open `http://localhost:8080` (or the URL printed by `scripts/start_platform.py`) and follow the 4-step guided workflow:
+1. Upload .h5ad file
+2. Review validation results → confirm
+3. Review mapping results → confirm
+4. Download standardised output
 
-#### 使用 API
-
-#### 创建提交任务
+**API**:
 ```bash
-curl -X POST "http://localhost:8000/submissions"
+# Create submission
+curl -X POST "http://localhost:8100/submissions"
+
+# Upload file
+curl -X POST "http://localhost:8100/submissions/{id}/upload" -F "file=@data.h5ad"
+
+# Check status
+curl "http://localhost:8100/submissions/{id}/status"
+
+# Download report / processed file
+curl "http://localhost:8100/submissions/{id}/report" -o report.json
+curl "http://localhost:8100/submissions/{id}/export" -o processed.h5ad
 ```
 
-#### 上传 h5ad 文件
+## Incremental Update SOP
+
+To expand the cell type lookup table with new datasets (see also **使用说明.md** in Chinese):
+
 ```bash
-curl -X POST "http://localhost:8000/submissions/{submission_id}/upload" \
-     -F "file=@your_data.h5ad"
+python scripts/incremental_update_sop.py --h5ad_dir /path/to/h5ad_folder
+# After filling selected_column in the generated configs/dataset_config_<run_id>.csv:
+python scripts/incremental_update_sop.py --resume results/logs/sop_state_<run_id>.json
+# Or jump to a phase, e.g. merge:
+python scripts/incremental_update_sop.py --h5ad_dir /path/to/h5ad_folder --start_phase merge
 ```
 
-#### 查询处理状态
+## Evaluation
+
+Run benchmark evaluation:
+
 ```bash
-curl "http://localhost:8000/submissions/{submission_id}/status"
+# Local method only
+python scripts/evaluate_mapping.py --method local
+
+# Compare local vs. ZOOMA
+python scripts/evaluate_mapping.py --method both
 ```
 
-#### 下载处理报告
-```bash
-curl "http://localhost:8000/submissions/{submission_id}/report" -o report.json
-```
+## Output Files
 
-#### 下载处理结果
-```bash
-curl "http://localhost:8000/submissions/{submission_id}/export" -o processed_data.h5ad
-```
+- **Processed .h5ad**: Original data + `cl_id`, `cl_label`, `original_cell_type` in obs
+- **JSON Report**: Summary statistics, gene/cell type mapping rates, quality metrics
+- **TSV Mapping Details**: Per-gene and per-cell-type mapping results
 
-## API 接口
+## Notes
 
-### POST /submissions
-创建新的提交任务
+- Fully offline — no network dependency for mapping operations
+- Currently supports murine (Mus musculus) datasets
+- .h5ad (AnnData) format only
+- Recommended: files under 1GB for optimal performance
 
-**响应**:
-```json
-{
-  "submission_id": "uuid",
-  "status": "pending",
-  "message": "提交任务已创建，请上传 h5ad 文件"
-}
-```
-
-### POST /submissions/{submission_id}/upload
-上传 h5ad 文件
-
-**参数**:
-- `file`: h5ad 文件
-
-**响应**:
-```json
-{
-  "submission_id": "uuid",
-  "status": "processing",
-  "message": "文件上传成功，正在处理中..."
-}
-```
-
-### GET /submissions/{submission_id}/status
-查询处理状态
-
-**响应**:
-```json
-{
-  "submission_id": "uuid",
-  "status": "completed",
-  "created_at": "2024-01-01T00:00:00",
-  "updated_at": "2024-01-01T00:05:00"
-}
-```
-
-### GET /submissions/{submission_id}/report
-下载处理报告 (JSON 格式)
-
-### GET /submissions/{submission_id}/export
-下载处理结果 (h5ad 格式)
-
-## 处理流程
-
-1. **上传**: 用户上传 h5ad 文件
-2. **校验**: 检查文件结构和基本语义
-3. **基因映射**: 将基因符号映射到 Ensembl ID
-4. **细胞类型标准化**: 将细胞类型标签映射到 CL Ontology
-5. **导出**: 生成标准化的数据和报告
-
-## 状态说明
-
-- `pending`: 等待上传
-- `uploading`: 正在上传
-- `processing`: 正在处理
-- `completed`: 处理完成
-- `failed`: 处理失败
-- `validation_failed`: 校验失败
-
-## 输出文件
-
-### 处理后的 h5ad 文件
-- 包含原始数据 + 映射结果
-- 新增列: `ensembl_gene_id_mapped`, `cl_id`, `cl_label`
-- 处理信息保存在 `uns['processing_info']`
-
-### 处理报告 (JSON)
-```json
-{
-  "submission_id": "uuid",
-  "summary": {
-    "n_cells": 1000,
-    "n_genes": 2000,
-    "file_size_mb": 15.5
-  },
-  "gene_mapping": {
-    "mapped_count": 1800,
-    "unmapped_count": 200,
-    "mapping_rate": 90.0
-  },
-  "cell_type_mapping": {
-    "mapped_count": 8,
-    "unmapped_count": 2,
-    "mapping_rate": 80.0
-  },
-  "quality_metrics": {
-    "sparsity": 0.95,
-    "mean_genes_per_cell": 1200
-  },
-  "recommendations": [
-    "建议检查基因符号格式",
-    "建议人工审核细胞类型标签"
-  ]
-}
-```
-
-### 映射详情 (TSV)
-- `gene_mapping_{submission_id}.tsv`: 基因映射详情
-- `cell_type_mapping_{submission_id}.tsv`: 细胞类型映射详情
-
-## 注意事项
-
-1. **网络依赖**: 需要访问 mygene.info 和 Zooma API
-2. **文件大小**: 建议单个文件不超过 1GB
-3. **处理时间**: 取决于文件大小和网络状况
-4. **数据格式**: 仅支持 h5ad 格式
-5. **物种支持**: 当前主要支持小鼠数据
-
-## 开发说明
-
-### 项目结构
-```
-├── main.py                 # FastAPI 主应用
-├── database.py            # 数据库配置和模型
-├── models.py              # Pydantic 模型
-├── upload_service.py      # 文件上传服务
-├── validation_service.py  # 数据校验服务
-├── mapping_service.py     # 基因和细胞类型映射服务
-├── export_service.py      # 数据导出服务
-├── start_platform.py     # 一键启动脚本
-├── requirements.txt       # 依赖包
-├── frontend/              # 前端界面
-│   ├── index.html        # 主页面
-│   ├── style.css         # 样式文件
-│   ├── script.js         # JavaScript逻辑
-│   └── README.md         # 前端说明
-└── README.md             # 说明文档
-```
-
-### 数据库表
-- `submissions`: 提交任务记录
-- `mapping_logs`: 映射处理日志
-
-### 目录结构
-- `uploads/`: 原始上传文件
-- `exports/`: 处理后的导出文件
-- `reports/`: 处理报告
-- `chunks/`: 分片上传临时文件
-
-## 后续计划
-
-- [ ] 支持更多文件格式 (MTX, Seurat RDS)
-- [ ] 添加前端界面
-- [ ] 支持批量处理
-- [ ] 添加人工审核工作台
-- [ ] 优化大文件处理性能
-- [ ] 添加更多质量检查规则
-
-## 许可证
+## License
 
 MIT License
 
-=======
-# scRNA-seq_db
->>>>>>> bea7ad2d31ed4d25f52c0107b01f30ca3dab40c7
+## Documentation (Chinese)
+
+For a full Chinese usage guide (setup, ports, CLI, data layout), see **[使用说明.md](使用说明.md)**.

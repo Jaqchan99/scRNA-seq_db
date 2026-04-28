@@ -27,7 +27,9 @@ def start_backend():
     """启动后端API服务"""
     print("🚀 启动后端API服务...")
     try:
-        subprocess.run(["python", "main.py"], check=True)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        backend_path = os.path.join(project_root, "src", "main.py")
+        subprocess.run(["python", backend_path], check=True)
     except subprocess.CalledProcessError as e:
         print(f"❌ 后端服务启动失败: {e}")
     except KeyboardInterrupt:
@@ -38,11 +40,17 @@ def start_frontend(port=8080):
     print(f"🌐 启动前端服务 (端口: {port})...")
     
     # 切换到前端目录
-    frontend_dir = os.path.join(os.path.dirname(__file__), 'frontend')
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    frontend_dir = os.path.join(project_root, 'frontend')
     os.chdir(frontend_dir)
     
     class CustomHandler(SimpleHTTPRequestHandler):
         def end_headers(self):
+            # 开发时禁用静态资源强缓存，否则改了 script.js / style.css 浏览器仍用旧文件
+            path_only = (self.path.split('?', 1)[0] or '').lower()
+            if path_only.endswith(('.html', '.htm', '.js', '.css', '.mjs', '.json')):
+                self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+                self.send_header('Pragma', 'no-cache')
             # 添加CORS头
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -83,7 +91,11 @@ def main():
         return
     
     # 检查前端文件
-    frontend_files = ['frontend/index.html', 'frontend/style.css', 'frontend/script.js']
+    frontend_files = [
+        os.path.join('frontend', 'index.html'),
+        os.path.join('frontend', 'style.css'),
+        os.path.join('frontend', 'script.js'),
+    ]
     for file in frontend_files:
         if not os.path.exists(file):
             print(f"❌ 前端文件不存在: {file}")

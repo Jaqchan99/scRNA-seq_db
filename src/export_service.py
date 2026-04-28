@@ -78,26 +78,30 @@ class ExportService:
         """应用基因映射结果"""
         print("🧬 应用基因映射结果...")
         
-        # 创建基因映射详情
-        mapping_details = gene_mapping_result.get("mapping_details", [])
+        # 新算法已经在 mapping_service 中直接更新了 adata.var_names
+        # 这里只需记录统计信息
         
-        # 创建映射字典
-        symbol_to_ensembl = {}
-        for detail in mapping_details:
-            symbol = detail["gene_symbol"]
-            ensembl_id = detail["ensembl_id"]
-            if ensembl_id:
-                symbol_to_ensembl[symbol] = ensembl_id
+        mapped_count = gene_mapping_result.get("mapped_count", 0)
+        total_genes = gene_mapping_result.get("total_genes", len(adata.var))
+        success_rate = gene_mapping_result.get("success_rate", 0)
         
-        # 添加 Ensembl ID 列到 var
-        if 'gene_symbol' in adata.var.columns:
-            adata.var['ensembl_gene_id_mapped'] = adata.var['gene_symbol'].map(symbol_to_ensembl)
-            
-            # 统计映射情况
-            mapped_genes = adata.var['ensembl_gene_id_mapped'].notna().sum()
-            total_genes = len(adata.var)
-            
-            print(f"📊 基因映射统计: {mapped_genes}/{total_genes} ({mapped_genes/total_genes*100:.1f}%)")
+        # 检查是否有 original_gene_name 列（新算法会添加）
+        if 'original_gene_name' in adata.var.columns:
+            print(f"📊 基因映射统计: {mapped_count}/{total_genes} ({success_rate}%)")
+        else:
+            # 兼容旧数据：如果没有 original_gene_name，尝试使用 mapping_details
+            mapping_details = gene_mapping_result.get("mapping_details", [])
+            if mapping_details:
+                # 兼容新旧两种格式
+                symbol_to_mapped = {}
+                for detail in mapping_details:
+                    symbol = detail.get("gene_symbol", "")
+                    # 新格式用 mapped_symbol，旧格式用 ensembl_id
+                    mapped = detail.get("mapped_symbol") or detail.get("ensembl_id")
+                    if mapped and detail.get("status") == "mapped":
+                        symbol_to_mapped[symbol] = mapped
+                
+                print(f"📊 基因映射详情: {len(symbol_to_mapped)} 个基因有映射记录")
         
         return adata
     
@@ -166,18 +170,42 @@ class ExportService:
                 "metadata": {}
             },
             "gene_mapping": {
-                "total_genes": len(gene_mapping_result.get("mapping_details", [])),
+                "total_genes": gene_mapping_result.get("total_genes")
+                    or len(gene_mapping_result.get("mapping_details", [])),
                 "mapped_count": gene_mapping_result.get("mapped_count", 0),
                 "unmapped_count": gene_mapping_result.get("unmapped_count", 0),
                 "ambiguous_count": gene_mapping_result.get("ambiguous_count", 0),
-                "mapping_rate": round(gene_mapping_result.get("mapped_count", 0) / max(len(gene_mapping_result.get("mapping_details", [])), 1) * 100, 2)
+                # 与评估侧一致：成功映射基因数 / 总基因数（而非 / 详情条数）
+                "mapping_rate": round(
+                    gene_mapping_result.get("mapped_count", 0)
+                    / max(
+                        gene_mapping_result.get("total_genes")
+                        or len(gene_mapping_result.get("mapping_details", [])),
+                        1,
+                    )
+                    * 100,
+                    2,
+                ),
             },
             "cell_type_mapping": {
                 "total_types": len(cell_type_mapping_result.get("mapping_details", [])),
                 "mapped_count": cell_type_mapping_result.get("mapped_count", 0),
                 "unmapped_count": cell_type_mapping_result.get("unmapped_count", 0),
                 "ambiguous_count": cell_type_mapping_result.get("ambiguous_count", 0),
-                "mapping_rate": round(cell_type_mapping_result.get("mapped_count", 0) / max(len(cell_type_mapping_result.get("mapping_details", [])), 1) * 100, 2)
+                # 与 evaluate_mapping 一致：映射到 CL 的细胞数 / 总细胞数
+                "mapping_rate": (
+                    round(
+                        cell_type_mapping_result.get("mapped_cells", 0)
+                        / max(cell_type_mapping_result.get("total_cells", 0), 1)
+                        * 100,
+                        2,
+                    )
+                    if cell_type_mapping_result.get("total_cells", 0) > 0
+                    else round(cell_type_mapping_result.get("cell_mapping_rate", 0), 2)
+                ),
+                "mapped_cells": cell_type_mapping_result.get("mapped_cells", 0),
+                "total_cells": cell_type_mapping_result.get("total_cells", 0),
+                "cell_mapping_rate": cell_type_mapping_result.get("cell_mapping_rate", 0),
             },
             "quality_metrics": self._calculate_quality_metrics(adata),
             "mapping_details": {
@@ -237,13 +265,20 @@ class ExportService:
         """生成处理建议"""
         recommendations = []
         
-        # 基因映射建议
-        gene_mapping_rate = gene_mapping_result.get("mapped_count", 0) / max(len(gene_mapping_result.get("mapping_details", [])), 1)
+        # 基因映射建议（mapped / total_genes）
+        tg = gene_mapping_result.get("total_genes") or len(gene_mapping_result.get("mapping_details", []))
+        gene_mapping_rate = gene_mapping_result.get("mapped_count", 0) / max(tg, 1)
         if gene_mapping_rate < 0.8:
             recommendations.append(f"基因映射率较低 ({gene_mapping_rate*100:.1f}%)，建议检查基因符号格式")
-        
-        # 细胞类型映射建议
-        cell_type_mapping_rate = cell_type_mapping_result.get("mapped_count", 0) / max(len(cell_type_mapping_result.get("mapping_details", [])), 1)
+
+        # 细胞类型：细胞级映射率
+        tc = cell_type_mapping_result.get("total_cells", 0)
+        if tc > 0:
+            cell_type_mapping_rate = cell_type_mapping_result.get("mapped_cells", 0) / tc
+        else:
+            cell_type_mapping_rate = cell_type_mapping_result.get("mapped_count", 0) / max(
+                len(cell_type_mapping_result.get("mapping_details", [])), 1
+            )
         if cell_type_mapping_rate < 0.5:
             recommendations.append(f"细胞类型映射率较低 ({cell_type_mapping_rate*100:.1f}%)，建议人工审核细胞类型标签")
         

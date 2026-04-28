@@ -8,7 +8,7 @@ import time
 import json
 import os
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8100"
 
 def create_minimal_test_data():
     """创建最小的测试数据"""

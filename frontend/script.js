@@ -1,581 +1,585 @@
-// Global variables
+// ═══════════════════════════════════════════════════════════════
+//  scRNA-seq Platform  —  script.js  v2.0
+// ═══════════════════════════════════════════════════════════════
+// UI build id — 若控制台看不到此行，说明浏览器仍在使用缓存的旧 script.js
+const PLATFORM_UI_BUILD = '20260411-4';
+
+const API_BASE_URL = 'http://localhost:8100';
+
 let currentSubmissionId = null;
 let currentStep = 1;
-const API_BASE_URL = 'http://localhost:8000';
+let cellTypeChart = null;
 
-// DOM elements
-const stepElements = document.querySelectorAll('.step');
-const contentElements = document.querySelectorAll('.step-content');
-const fileInput = document.getElementById('fileInput');
-const uploadArea = document.getElementById('uploadArea');
-const fileInfo = document.getElementById('fileInfo');
-const uploadBtn = document.getElementById('uploadBtn');
-const resetBtn = document.getElementById('resetBtn');
-const errorModal = document.getElementById('errorModal');
-const errorMessage = document.getElementById('errorMessage');
+// Chart.js colour palette (blue-toned, academic)
+const CHART_COLORS = [
+    '#1e3a5f','#2563eb','#0284c7','#0891b2','#0d9488',
+    '#16a34a','#65a30d','#ca8a04','#d97706','#dc2626',
+    '#9333ea','#7c3aed','#db2777','#e11d48','#475569',
+    '#0f766e','#1d4ed8','#4338ca','#6d28d9','#be185d',
+];
 
-// Initialization
-document.addEventListener('DOMContentLoaded', function() {
-    initializeEventListeners();
-    updateStatus('Ready');
+// ── Page navigation ──────────────────────────────────────────
+function showPage(name) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    document.getElementById('page-' + name).classList.add('active');
+    document.getElementById('nav-' + name).classList.add('active');
+}
+
+// ── Step navigation ──────────────────────────────────────────
+function goToStep(n) {
+    document.querySelectorAll('.step-content').forEach(c => c.classList.remove('active'));
+    document.getElementById('content-' + n).classList.add('active');
+
+    document.querySelectorAll('.step').forEach((s, i) => {
+        s.classList.remove('active', 'completed');
+        if (i + 1 < n)  s.classList.add('completed');
+        if (i + 1 === n) s.classList.add('active');
+    });
+
+    currentStep = n;
+}
+
+// ── Status bar ───────────────────────────────────────────────
+function updateStatus(msg, busy = true) {
+    document.getElementById('currentStatus').textContent = msg;
+    const dot = document.getElementById('statusDot');
+    dot.className = 'status-dot' + (busy ? ' busy' : '');
+}
+
+function setStatusId(id) {
+    const el = document.getElementById('statusId');
+    el.textContent = id ? 'ID: ' + id.slice(0, 8) + '…' : '';
+}
+
+// ── Error modal ──────────────────────────────────────────────
+function showError(msg) {
+    document.getElementById('errorMessage').textContent = msg;
+    document.getElementById('errorModal').style.display = 'flex';
+    updateStatus('Error — see modal', false);
+}
+
+function closeErrorModal() {
+    document.getElementById('errorModal').style.display = 'none';
+}
+
+// ── Metric card builder ──────────────────────────────────────
+function metricCard(label, value, sub, variant) {
+    const cls = variant ? ' ' + variant : '';
+    return `<div class="metric-card${cls}">
+        <div class="metric-label">${label}</div>
+        <div class="metric-value">${value}</div>
+        ${sub ? `<div class="metric-sub">${sub}</div>` : ''}
+    </div>`;
+}
+
+// ── Utility ──────────────────────────────────────────────────
+function formatFileSize(bytes) {
+    if (bytes < 1024)       return bytes + ' B';
+    if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+    return (bytes / 1073741824).toFixed(2) + ' GB';
+}
+
+/** Final export JSON nests full arrays under report.mapping_details — not under *.mapping_details */
+function getGeneMappingDetails(report) {
+    const gm = report.gene_mapping || {};
+    if (gm.mapping_details && gm.mapping_details.length) return gm.mapping_details;
+    return (report.mapping_details && report.mapping_details.gene_mapping) || [];
+}
+
+function getCellTypeMappingDetails(report) {
+    const cm = report.cell_type_mapping || {};
+    if (cm.mapping_details && cm.mapping_details.length) return cm.mapping_details;
+    return (report.mapping_details && report.mapping_details.cell_type_mapping) || [];
+}
+
+/** 映射率展示：兼容 mapping_rate 异常大于 100 的旧报告 */
+function formatMappingRatePct(block) {
+    const r = block.success_rate ?? block.mapping_rate;
+    if (r != null && r <= 100 && r >= 0) return Number(r).toFixed(1) + '%';
+    const map = Number(block.mapped_count) || 0;
+    const un = Number(block.unmapped_count) || 0;
+    const tot = map + un;
+    if (tot > 0) return ((map / tot) * 100).toFixed(1) + '%';
+    return '—';
+}
+
+/** Step 4 顶部单行：Status / Cells / Genes / Sparsity + 一行映射率说明 */
+function buildFinalSummaryHtml(report) {
+    const sum = report.summary || {};
+    const qm = report.quality_metrics || {};
+    const gm = report.gene_mapping || {};
+    const cm = report.cell_type_mapping || {};
+
+    const cells = sum.n_cells ?? qm.n_cells;
+    const genes = sum.n_genes ?? qm.n_genes;
+    const cellsStr = cells != null ? Number(cells).toLocaleString() : '—';
+    const genesStr = genes != null ? Number(genes).toLocaleString() : '—';
+
+    let sparsityStr = '—';
+    if (qm.sparsity != null) {
+        const s = Number(qm.sparsity);
+        sparsityStr = (s <= 1 ? (s * 100) : s).toFixed(1) + '%';
+    }
+
+    const gmPct = formatMappingRatePct(gm);
+    const cmPct = formatMappingRatePct(cm);
+
+    return `
+        <div class="final-summary-grid">
+            <div class="metric-card metric-card--compact metric-card--status success">
+                <div class="metric-label">Status</div>
+                <div class="metric-value metric-value--icon" title="Completed">✓</div>
+                <div class="metric-sub">Completed</div>
+            </div>
+            <div class="metric-card metric-card--compact success">
+                <div class="metric-label">Cells</div>
+                <div class="metric-value">${cellsStr}</div>
+            </div>
+            <div class="metric-card metric-card--compact success">
+                <div class="metric-label">Genes</div>
+                <div class="metric-value">${genesStr}</div>
+            </div>
+            <div class="metric-card metric-card--compact success">
+                <div class="metric-label">Sparsity</div>
+                <div class="metric-value">${sparsityStr}</div>
+            </div>
+        </div>
+        <p class="mapping-inline">Gene mapping <strong>${gmPct}</strong> · Cell type mapping <strong>${cmPct}</strong></p>
+    `;
+}
+
+// ── Init ─────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+
+    const area = document.getElementById('uploadArea');
+    area.addEventListener('click', () => document.getElementById('fileInput').click());
+    area.addEventListener('dragover',  e => { e.preventDefault(); area.classList.add('dragover'); });
+    area.addEventListener('dragleave', e => { e.preventDefault(); area.classList.remove('dragover'); });
+    area.addEventListener('drop', e => {
+        e.preventDefault();
+        area.classList.remove('dragover');
+        if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+
+    document.getElementById('uploadBtn').addEventListener('click', handleUpload);
+    document.getElementById('continueToMapping').addEventListener('click', startMapping);
+    document.getElementById('cancelProcess').addEventListener('click', resetProcess);
+    document.getElementById('continueToExport').addEventListener('click', startExport);
+    document.getElementById('cancelProcess2').addEventListener('click', resetProcess);
+    document.getElementById('resetBtn').addEventListener('click', resetProcess);
+
+    updateStatus('Ready', false);
+    console.info('[scRNA platform] UI build', PLATFORM_UI_BUILD, '— API', API_BASE_URL);
 });
 
-// Event listeners
-function initializeEventListeners() {
-    // File upload
-    fileInput.addEventListener('change', handleFileSelect);
-    uploadArea.addEventListener('click', () => fileInput.click());
-    uploadArea.addEventListener('dragover', handleDragOver);
-    uploadArea.addEventListener('dragleave', handleDragLeave);
-    uploadArea.addEventListener('drop', handleDrop);
-    uploadBtn.addEventListener('click', handleUpload);
-    resetBtn.addEventListener('click', resetProcess);
-    
-    // Confirmation buttons
-    document.getElementById('continueToMapping').addEventListener('click', startMapping);
-    document.getElementById('cancelProcess').addEventListener('click', cancelProcess);
-    document.getElementById('continueToExport').addEventListener('click', startExport);
-    document.getElementById('cancelProcess2').addEventListener('click', cancelProcess);
+// ── File selection ────────────────────────────────────────────
+function handleFileSelect(e) {
+    if (e.target.files[0]) handleFile(e.target.files[0]);
 }
 
-// File selection handler
-function handleFileSelect(event) {
-    const file = event.target.files[0];
-    if (file) {
-        processFile(file);
-    }
-}
-
-// Drag and drop handlers
-function handleDragOver(event) {
-    event.preventDefault();
-    uploadArea.classList.add('dragover');
-}
-
-function handleDragLeave(event) {
-    event.preventDefault();
-    uploadArea.classList.remove('dragover');
-}
-
-function handleDrop(event) {
-    event.preventDefault();
-    uploadArea.classList.remove('dragover');
-    const files = event.dataTransfer.files;
-    if (files.length > 0) {
-        processFile(files[0]);
-    }
-}
-
-// Process file
-function processFile(file) {
+function handleFile(file) {
     if (!file.name.endsWith('.h5ad')) {
-        showError('Please select a .h5ad format file');
+        showError('Please select a file in .h5ad (AnnData) format.');
         return;
     }
-    
-    // Display file information
     document.getElementById('fileName').textContent = file.name;
     document.getElementById('fileSize').textContent = formatFileSize(file.size);
-    fileInfo.style.display = 'block';
-    uploadBtn.disabled = false;
-    
-    // Store file reference
-    uploadBtn.file = file;
+    document.getElementById('fileInfo').style.display = 'block';
+    const btn = document.getElementById('uploadBtn');
+    btn.disabled = false;
+    btn._file = file;
 }
 
-// File upload
+// ── Step 1: Upload ────────────────────────────────────────────
 async function handleUpload() {
-    const file = uploadBtn.file;
+    const file = document.getElementById('uploadBtn')._file;
     if (!file) return;
-    
+
     try {
-        updateStatus('Creating submission task...');
-        
-        // 1. Create submission task
-        const submissionResponse = await fetch(`${API_BASE_URL}/submissions`, {
-            method: 'POST'
-        });
-        
-        if (!submissionResponse.ok) {
-            throw new Error('Failed to create submission task');
-        }
-        
-        const submissionData = await submissionResponse.json();
-        currentSubmissionId = submissionData.submission_id;
-        
-        updateStatus('Uploading file...');
-        
-        // 2. Upload file
+        updateStatus('Creating submission…');
+
+        const subRes = await fetch(`${API_BASE_URL}/submissions`, { method: 'POST' });
+        if (!subRes.ok) throw new Error('Failed to create submission task');
+        const subData = await subRes.json();
+        currentSubmissionId = subData.submission_id;
+        setStatusId(currentSubmissionId);
+
+        updateStatus('Uploading file…');
+
         const formData = new FormData();
         formData.append('file', file);
-        
-        const uploadResponse = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/upload`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        if (!uploadResponse.ok) {
-            const errorText = await uploadResponse.text();
-            throw new Error(`File upload failed: ${errorText}`);
+
+        // Attach disease type as a custom header (informational; backend stores it if supported)
+        const diseaseType = document.getElementById('diseaseType').value;
+        const uploadRes = await fetch(
+            `${API_BASE_URL}/submissions/${currentSubmissionId}/upload`,
+            { method: 'POST', body: formData }
+        );
+        if (!uploadRes.ok) {
+            const txt = await uploadRes.text();
+            throw new Error('Upload failed: ' + txt);
         }
-        
-        const uploadData = await uploadResponse.json();
-        console.log('Upload successful:', uploadData);
-        
-        // 3. Proceed to validation step
+
         goToStep(2);
         startValidation();
-        
-    } catch (error) {
-        console.error('Upload failed:', error);
-        showError(`Upload failed: ${error.message}`);
+
+    } catch (err) {
+        showError(err.message);
     }
 }
 
-// Start validation
+// ── Step 2: Validation ────────────────────────────────────────
 async function startValidation() {
+    updateStatus('Validating dataset…');
+
     try {
-        updateStatus('Validating data...');
-        
-        // Call validation API
-        const validateResponse = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/validate`, {
-            method: 'POST'
-        });
-        
-        if (!validateResponse.ok) {
-            throw new Error('Failed to start validation');
-        }
-        
-        // Poll for status
-        const checkInterval = setInterval(async () => {
+        const res = await fetch(
+            `${API_BASE_URL}/submissions/${currentSubmissionId}/validate`,
+            { method: 'POST' }
+        );
+        if (!res.ok) throw new Error('Failed to start validation');
+
+        const timer = setInterval(async () => {
             try {
-                const statusResponse = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/status`);
-                if (!statusResponse.ok) {
-                    throw new Error('Failed to query status');
-                }
-                
-                const statusData = await statusResponse.json();
-                console.log('Current status:', statusData);
-                
-                if (statusData.status === 'validated') {
-                    clearInterval(checkInterval);
+                const s = await (await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/status`)).json();
+                if (s.status === 'validated') {
+                    clearInterval(timer);
                     await showValidationResults();
-                    document.getElementById('validationConfirmation').style.display = 'block';
-                    updateStatus('Validation completed, waiting for confirmation');
-                } else if (statusData.status === 'validation_failed' || statusData.status === 'failed') {
-                    clearInterval(checkInterval);
-                    showError(`Validation failed: ${statusData.error_message || 'Unknown error'}`);
+                    document.getElementById('validationConfirmation').style.display = 'flex';
+                    updateStatus('Validation complete — awaiting confirmation', false);
+                } else if (s.status === 'validation_failed' || s.status === 'failed') {
+                    clearInterval(timer);
+                    showError('Validation failed: ' + (s.error_message || 'Unknown error'));
                 }
-                // Continue waiting for validating status
-                
-            } catch (error) {
-                clearInterval(checkInterval);
-                console.error('Status check failed:', error);
-                showError(`Status check failed: ${error.message}`);
-            }
-        }, 2000); // Check every 2 seconds
-        
-    } catch (error) {
-        console.error('Validation failed:', error);
-        showError(`Validation failed: ${error.message}`);
-    }
+            } catch (e) { clearInterval(timer); showError(e.message); }
+        }, 2000);
+
+    } catch (err) { showError(err.message); }
 }
 
-// Show validation results
 async function showValidationResults() {
     try {
-        const reportResponse = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/report`);
-        if (!reportResponse.ok) {
-            throw new Error('Failed to fetch report');
-        }
-        
-        const reportData = await reportResponse.json();
-        console.log('Validation report:', reportData);
-        
-        // Display validation results
-        const validationResults = document.getElementById('validationResults');
-        const resultSummary = document.getElementById('resultSummary');
-        const resultDetails = document.getElementById('resultDetails');
-        
-        // Hide loading status
-        document.getElementById('validationStatus').style.display = 'none';
-        
-        // Create summary cards
-        const summary = reportData.summary || {};
-        const validation = reportData.validation_result || {};
-        
-        resultSummary.innerHTML = `
-            <div class="summary-card success">
-                <h4>Number of Cells</h4>
-                <div class="number">${summary.n_cells || 0}</div>
-            </div>
-            <div class="summary-card success">
-                <h4>Number of Genes</h4>
-                <div class="number">${summary.n_genes || 0}</div>
-            </div>
-            <div class="summary-card success">
-                <h4>File Size</h4>
-                <div class="number">${summary.file_size_mb || 0} MB</div>
-            </div>
-        `;
-        
-        // Display validation details
-        const errors = validation.errors || [];
-        const warnings = validation.warnings || [];
-        
-        let detailsHtml = '';
-        if (errors.length > 0) {
-            detailsHtml += '<h4 style="color: #dc2626; margin-top: 20px;">Errors:</h4><ul style="color: #dc2626; margin-left: 20px;">';
-            errors.forEach(error => {
-                detailsHtml += `<li style="margin: 8px 0;">${error}</li>`;
-            });
-            detailsHtml += '</ul>';
-        }
-        
-        if (warnings.length > 0) {
-            detailsHtml += '<h4 style="color: #d97706; margin-top: 20px;">Warnings:</h4><ul style="color: #d97706; margin-left: 20px;">';
-            warnings.forEach(warning => {
-                detailsHtml += `<li style="margin: 8px 0;">${warning}</li>`;
-            });
-            detailsHtml += '</ul>';
-        }
-        
+        const report = await (await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/report`)).json();
+        const summary = report.summary || {};
+        const val     = report.validation_result || {};
+
+        // Metrics
+        const fileSizeMB = summary.file_size_mb ? Number(summary.file_size_mb).toFixed(2) : '0.00';
+        document.getElementById('resultSummary').innerHTML =
+            metricCard('Cells',      (summary.n_cells  || 0).toLocaleString(), null, 'success') +
+            metricCard('Genes',      (summary.n_genes  || 0).toLocaleString(), null, 'success') +
+            metricCard('File Size',  fileSizeMB + ' MB',      null, '');
+
+        // Details
+        const errors   = val.errors   || [];
+        const warnings = val.warnings || [];
+        let html = '';
         if (errors.length === 0 && warnings.length === 0) {
-            detailsHtml = '<p style="color: #0d4f8c; font-size: 1.1em; margin-top: 20px;">✓ Validation passed, no errors or warnings found</p>';
+            html = '<p class="msg-success">✓ Validation passed — no errors or warnings found.</p>';
         }
-        
-        resultDetails.innerHTML = detailsHtml;
-        validationResults.style.display = 'block';
-        
-    } catch (error) {
-        console.error('Failed to show validation results:', error);
-        showError(`Failed to show validation results: ${error.message}`);
-    }
+        errors.forEach(e   => { html += `<p class="msg-error">✗ ${e}</p>`; });
+        warnings.forEach(w => { html += `<p class="msg-warning">⚠ ${w}</p>`; });
+        document.getElementById('resultDetails').innerHTML = html;
+
+        document.getElementById('validationStatus').style.display = 'none';
+        document.getElementById('validationResults').style.display = 'block';
+
+    } catch (err) { showError('Failed to load validation report: ' + err.message); }
 }
 
-// Start mapping
+// ── Step 3: Mapping ───────────────────────────────────────────
 async function startMapping() {
+    goToStep(3);
+    updateStatus('Running gene & cell type mapping…');
+
     try {
-        goToStep(3);
-        updateStatus('Performing gene mapping and cell type standardization...');
-        
-        // Call continue processing API
-        const continueResponse = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/continue`, {
-            method: 'POST'
-        });
-        
-        if (!continueResponse.ok) {
-            throw new Error('Failed to start mapping');
-        }
-        
-        // Poll for status
-        const checkInterval = setInterval(async () => {
+        const res = await fetch(
+            `${API_BASE_URL}/submissions/${currentSubmissionId}/continue`,
+            { method: 'POST' }
+        );
+        if (!res.ok) throw new Error('Failed to start mapping');
+
+        const timer = setInterval(async () => {
             try {
-                const statusResponse = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/status`);
-                if (!statusResponse.ok) {
-                    throw new Error('Failed to query status');
-                }
-                
-                const statusData = await statusResponse.json();
-                console.log('Current status:', statusData);
-                
-                if (statusData.status === 'completed') {
-                    clearInterval(checkInterval);
+                const s = await (await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/status`)).json();
+                if (s.status === 'completed') {
+                    clearInterval(timer);
                     await showMappingResults();
-                    document.getElementById('mappingConfirmation').style.display = 'block';
-                    updateStatus('Mapping completed, waiting for confirmation');
-                } else if (statusData.status === 'failed') {
-                    clearInterval(checkInterval);
-                    showError(`Processing failed: ${statusData.error_message || 'Unknown error'}`);
+                    document.getElementById('mappingConfirmation').style.display = 'flex';
+                    updateStatus('Mapping complete — awaiting confirmation', false);
+                } else if (s.status === 'failed') {
+                    clearInterval(timer);
+                    showError('Mapping failed: ' + (s.error_message || 'Unknown error'));
                 }
-                
-            } catch (error) {
-                clearInterval(checkInterval);
-                console.error('Status check failed:', error);
-                showError(`Status check failed: ${error.message}`);
-            }
+            } catch (e) { clearInterval(timer); showError(e.message); }
         }, 2000);
-        
-    } catch (error) {
-        console.error('Mapping failed:', error);
-        showError(`Mapping failed: ${error.message}`);
-    }
+
+    } catch (err) { showError(err.message); }
 }
 
-// Show mapping results
 async function showMappingResults() {
     try {
-        const reportResponse = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/report`);
-        if (!reportResponse.ok) {
-            throw new Error('Failed to fetch report');
+        const report   = await (await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/report`)).json();
+        const gm       = report.gene_mapping      || {};
+        const cm       = report.cell_type_mapping || {};
+
+        const gmRate   = gm.success_rate  ?? gm.mapping_rate  ?? 0;
+        const gmRateStr = Number(gmRate).toFixed(1) + '%';
+        
+        // Cell type mapping: 优先使用后端返回的 cell_mapping_rate，否则前端计算
+        let cmCellRate, mappedCells, totalCells;
+        if (cm.cell_mapping_rate != null && cm.mapped_cells != null && cm.total_cells != null) {
+            cmCellRate = cm.cell_mapping_rate;
+            mappedCells = cm.mapped_cells;
+            totalCells = cm.total_cells;
+        } else {
+            // 兼容旧报告：前端计算
+            const cmDetails = getCellTypeMappingDetails(report);
+            mappedCells = 0;
+            totalCells = 0;
+            cmDetails.forEach(d => {
+                const count = Number(d.cell_count) || 1;
+                totalCells += count;
+                if (d.status === 'mapped') mappedCells += count;
+            });
+            cmCellRate = totalCells > 0 ? ((mappedCells / totalCells) * 100) : 0;
         }
-        
-        const reportData = await reportResponse.json();
-        console.log('Mapping report:', reportData);
-        
-        // Display mapping results
-        const mappingResults = document.getElementById('mappingResults');
-        const mappingSummary = document.getElementById('mappingSummary');
-        const mappingDetails = document.getElementById('mappingDetails');
-        
-        // Hide loading status
+        const cmCellRateStr = cmCellRate.toFixed(1) + '%';
+
+        // Metrics
+        document.getElementById('mappingSummary').innerHTML =
+            metricCard('Genes Mapped',      (gm.mapped_count   || 0).toLocaleString(), gmRateStr + ' success', 'success') +
+            metricCard('Cells Mapped',      mappedCells.toLocaleString(), cmCellRateStr + ' success', 'success') +
+            metricCard('Unmapped Genes',    (gm.unmapped_count || 0).toLocaleString(), null, gm.unmapped_count > 0 ? 'warning' : '') +
+            metricCard('Cell Types Mapped', (cm.mapped_count   || 0) + ' / ' + (cm.total_unique_types || cm.total_types || 0), null, '');
+
+        // Details table (top 10 gene mapping)
+        const gd = getGeneMappingDetails(report).slice(0, 10);
+        let html = '';
+        if (gd.length) {
+            html += '<p style="font-weight:600;color:#1e293b;margin-bottom:10px;">Gene Mapping — Top 10 entries</p>';
+            html += '<div class="table-wrapper"><table class="data-table"><thead><tr><th>Original Symbol</th><th>Mapped Symbol</th><th>Status</th></tr></thead><tbody>';
+            gd.forEach(r => {
+                const ok = r.status === 'mapped';
+                html += `<tr><td>${r.gene_symbol||''}</td><td>${r.mapped_symbol||'—'}</td>
+                    <td><span class="badge ${ok?'badge-success':'badge-warning'}">${r.status||''}</span></td></tr>`;
+            });
+            html += '</tbody></table></div>';
+        }
+        document.getElementById('mappingDetails').innerHTML = html;
+
         document.getElementById('mappingStatus').style.display = 'none';
-        
-        // Create mapping summary
-        const geneMapping = reportData.gene_mapping || {};
-        const cellTypeMapping = reportData.cell_type_mapping || {};
-        
-        mappingSummary.innerHTML = `
-            <div class="summary-card success">
-                <h4>Gene Mapping Success</h4>
-                <div class="number">${geneMapping.mapped_count || 0}</div>
-                <p>Success Rate: ${geneMapping.mapping_rate || 0}%</p>
-            </div>
-            <div class="summary-card success">
-                <h4>Cell Type Mapping Success</h4>
-                <div class="number">${cellTypeMapping.mapped_count || 0}</div>
-                <p>Success Rate: ${cellTypeMapping.mapping_rate || 0}%</p>
-            </div>
-        `;
-        
-        // Display mapping details
-        const geneDetails = geneMapping.mapping_details || [];
-        const cellTypeDetails = cellTypeMapping.mapping_details || [];
-        
-        let detailsHtml = '<h4>Gene Mapping Details (Top 10):</h4>';
-        if (geneDetails.length > 0) {
-            detailsHtml += '<table class="details-table"><thead><tr><th>Gene Symbol</th><th>Ensembl ID</th><th>Status</th><th>Confidence</th></tr></thead><tbody>';
-            geneDetails.slice(0, 10).forEach(detail => {
-                const statusClass = detail.status === 'mapped' ? 'success' : 'warning';
-                detailsHtml += `<tr>
-                    <td>${detail.gene_symbol || ''}</td>
-                    <td>${detail.ensembl_id || 'N/A'}</td>
-                    <td class="${statusClass}">${detail.status || 'unknown'}</td>
-                    <td>${detail.confidence || 'N/A'}</td>
-                </tr>`;
-            });
-            detailsHtml += '</tbody></table>';
-        } else {
-            detailsHtml += '<p>No gene mapping details available</p>';
-        }
-        
-        detailsHtml += '<h4 style="margin-top: 30px;">Cell Type Mapping Details (Top 10):</h4>';
-        if (cellTypeDetails.length > 0) {
-            detailsHtml += '<table class="details-table"><thead><tr><th>Raw Type</th><th>CL ID</th><th>CL Label</th><th>Status</th></tr></thead><tbody>';
-            cellTypeDetails.slice(0, 10).forEach(detail => {
-                const statusClass = detail.status === 'mapped' ? 'success' : 'warning';
-                detailsHtml += `<tr>
-                    <td>${detail.raw_cell_type || ''}</td>
-                    <td>${detail.cl_id || 'N/A'}</td>
-                    <td>${detail.cl_label || 'N/A'}</td>
-                    <td class="${statusClass}">${detail.status || 'unknown'}</td>
-                </tr>`;
-            });
-            detailsHtml += '</tbody></table>';
-        } else {
-            detailsHtml += '<p>No cell type mapping details available</p>';
-        }
-        
-        mappingDetails.innerHTML = detailsHtml;
-        mappingResults.style.display = 'block';
-        
-    } catch (error) {
-        console.error('Failed to show mapping results:', error);
-        showError(`Failed to show mapping results: ${error.message}`);
-    }
+        document.getElementById('mappingResults').style.display = 'block';
+
+    } catch (err) { showError('Failed to load mapping report: ' + err.message); }
 }
 
-// Start export
+// ── Step 4: Export & Results ──────────────────────────────────
 async function startExport() {
     goToStep(4);
-    showFinalResults();
-}
+    updateStatus('Generating output files…');
 
-// Show final results
-async function showFinalResults() {
     try {
-        updateStatus('Generating final results...');
-        
-        const reportResponse = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/report`);
-        if (!reportResponse.ok) {
-            throw new Error('Failed to fetch final report');
+        // Results are already generated; just load the final report
+        const report = await (await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/report`)).json();
+        await showFinalResults(report);
+        updateStatus('Processing complete', false);
+    } catch (err) { showError(err.message); }
+}
+
+async function showFinalResults(report) {
+    const details = getCellTypeMappingDetails(report);
+
+    document.getElementById('finalSummary').innerHTML = buildFinalSummaryHtml(report);
+
+    document.getElementById('downloadReport').onclick = () => downloadFile(
+        `${API_BASE_URL}/submissions/${currentSubmissionId}/report`,
+        `report_${currentSubmissionId.slice(0,8)}.json`
+    );
+    document.getElementById('downloadData').onclick = () => downloadFile(
+        `${API_BASE_URL}/submissions/${currentSubmissionId}/export`,
+        `processed_${currentSubmissionId.slice(0,8)}.h5ad`
+    );
+
+    // 先显示面板，再画图：否则父级 display:none 时 Canvas 宽高为 0，Chart.js 不可见
+    document.getElementById('resultsContainer').style.display = 'none';
+    document.getElementById('finalResults').style.display = 'block';
+
+    if (details.length > 0) {
+        document.getElementById('chartSection').style.display = 'block';
+        document.getElementById('cellTypeTableSection').style.display = 'block';
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                buildCellTypeChart(details);
+                buildCellTypeTable(details);
+                if (cellTypeChart && typeof cellTypeChart.resize === 'function') {
+                    cellTypeChart.resize();
+                }
+            });
+        });
+    } else {
+        document.getElementById('chartSection').style.display = 'none';
+        document.getElementById('cellTypeTableSection').style.display = 'none';
+    }
+}
+
+// ── Cell Type Distribution Chart ──────────────────────────────
+function buildCellTypeChart(details) {
+    // Aggregate: sum cell_count per CL label (backend sends cell_count per unique type)
+    const counts = {};
+    details.forEach(d => {
+        const label = (d.cl_label && d.cl_label !== 'None' && d.cl_label !== 'null')
+            ? d.cl_label : d.raw_cell_type;
+        if (!label) return;
+        const n = Number(d.cell_count);
+        counts[label] = (counts[label] || 0) + (Number.isFinite(n) && n > 0 ? n : 1);
+    });
+
+    // Sort by count descending, cap at 20 for readability
+    const sorted = Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20);
+
+    if (sorted.length === 0) {
+        if (cellTypeChart) {
+            cellTypeChart.destroy();
+            cellTypeChart = null;
         }
-        
-        const reportData = await reportResponse.json();
-        console.log('Final report:', reportData);
-        
-        // Display final results
-        const finalResults = document.getElementById('finalResults');
-        const finalSummary = document.getElementById('finalSummary');
-        const resultsContainer = document.getElementById('resultsContainer');
-        
-        resultsContainer.style.display = 'none';
-        
-        const summary = reportData.summary || {};
-        const qualityMetrics = reportData.quality_metrics || {};
-        
-        finalSummary.innerHTML = `
-            <div class="summary-card success">
-                <h4>Processing Completed</h4>
-                <div class="number">✓</div>
-                <p>Data successfully processed</p>
-            </div>
-            <div class="summary-card success">
-                <h4>Number of Cells</h4>
-                <div class="number">${summary.n_cells || 0}</div>
-            </div>
-            <div class="summary-card success">
-                <h4>Number of Genes</h4>
-                <div class="number">${summary.n_genes || 0}</div>
-            </div>
-            <div class="summary-card success">
-                <h4>Sparsity</h4>
-                <div class="number">${(qualityMetrics.sparsity * 100 || 0).toFixed(1)}%</div>
-            </div>
-        `;
-        
-        finalResults.style.display = 'block';
-        updateStatus('Processing completed');
-        resetBtn.style.display = 'inline-block';
-        
-        // Set download buttons
-        document.getElementById('downloadReport').onclick = () => downloadReport();
-        document.getElementById('downloadData').onclick = () => downloadData();
-        
-    } catch (error) {
-        console.error('Failed to show final results:', error);
-        showError(`Failed to show final results: ${error.message}`);
+        document.getElementById('chartLegend').innerHTML =
+            '<p class="chart-empty" style="color:#94a3b8;font-size:0.88em;">No cell types to plot.</p>';
+        return;
     }
-}
 
-// Cancel processing
-function cancelProcess() {
-    if (confirm('Are you sure you want to cancel the processing?')) {
-        resetProcess();
-    }
-}
+    const labels = sorted.map(([l]) => l.length > 28 ? l.slice(0, 26) + '…' : l);
+    const data   = sorted.map(([, v]) => v);
+    const colors = sorted.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]);
 
-// Download report
-async function downloadReport() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/report`);
-        if (!response.ok) {
-            throw new Error('Failed to download report');
-        }
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `report_${currentSubmissionId}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        
-    } catch (error) {
-        console.error('Failed to download report:', error);
-        showError(`Failed to download report: ${error.message}`);
-    }
-}
+    const ctx = document.getElementById('cellTypeChart').getContext('2d');
+    if (cellTypeChart) cellTypeChart.destroy();
 
-// Download data
-async function downloadData() {
-    try {
-        const response = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/export`);
-        if (!response.ok) {
-            throw new Error('Failed to download data');
-        }
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `processed_${currentSubmissionId}.h5ad`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        
-    } catch (error) {
-        console.error('Failed to download data:', error);
-        showError(`Failed to download data: ${error.message}`);
-    }
-}
-
-// Step navigation
-function goToStep(step) {
-    // Update step indicator
-    stepElements.forEach((element, index) => {
-        element.classList.remove('active', 'completed');
-        if (index + 1 < step) {
-            element.classList.add('completed');
-        } else if (index + 1 === step) {
-            element.classList.add('active');
+    cellTypeChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Cell types',
+                data,
+                backgroundColor: colors.map(c => c + 'cc'),
+                borderColor: colors,
+                borderWidth: 1.5,
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => sorted[items[0].dataIndex][0],
+                        label: (item) => ' Cells: ' + item.raw,
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: {
+                        font: { size: 11 },
+                        maxRotation: 40,
+                        color: '#64748b',
+                    },
+                    grid: { display: false },
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { font: { size: 11 }, color: '#64748b', precision: 0 },
+                    grid: { color: '#f1f5f9' },
+                    title: { display: true, text: 'Cells', color: '#94a3b8', font: { size: 11 } }
+                }
+            }
         }
     });
-    
-    // Update content area
-    contentElements.forEach((element, index) => {
-        element.classList.remove('active');
-        if (index + 1 === step) {
-            element.classList.add('active');
-        }
-    });
-    
-    currentStep = step;
+
+    // Legend
+    const legendEl = document.getElementById('chartLegend');
+    legendEl.innerHTML = sorted.slice(0, 10).map(([lbl], i) =>
+        `<div class="legend-item">
+            <div class="legend-dot" style="background:${colors[i]}"></div>
+            <span>${lbl.length > 22 ? lbl.slice(0,20)+'…' : lbl}</span>
+        </div>`
+    ).join('');
 }
 
-// Update status
-function updateStatus(message) {
-    document.getElementById('currentStatus').textContent = message;
+// ── Cell Type Table ───────────────────────────────────────────
+function buildCellTypeTable(details) {
+    const tbody = document.getElementById('cellTypeTableBody');
+    tbody.innerHTML = details.map(d => {
+        const mapped = d.status === 'mapped';
+        const conf   = d.confidence || '';
+        const confBadge = conf === 'high'   ? 'badge-success'
+                        : conf === 'medium' ? 'badge-info'
+                        : conf === 'low'    ? 'badge-warning'
+                        : 'badge-info';
+        return `<tr>
+            <td>${d.raw_cell_type || '—'}</td>
+            <td>${d.cl_id ? `<span class="cl-id">${d.cl_id}</span>` : '—'}</td>
+            <td>${d.cl_label || '—'}</td>
+            <td>${conf ? `<span class="badge ${confBadge}">${conf}</span>` : '—'}</td>
+            <td><span class="badge ${mapped ? 'badge-success' : 'badge-warning'}">${d.status||'—'}</span></td>
+        </tr>`;
+    }).join('');
 }
 
-// Show error
-function showError(message) {
-    errorMessage.textContent = message;
-    errorModal.style.display = 'flex';
+// ── Download helper ───────────────────────────────────────────
+function downloadFile(url, filename) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 }
 
-// Close error modal
-function closeErrorModal() {
-    errorModal.style.display = 'none';
-}
-
-// Reset process
+// ── Reset ─────────────────────────────────────────────────────
 function resetProcess() {
     currentSubmissionId = null;
     currentStep = 1;
-    
-    // Reset UI
-    goToStep(1);
-    fileInfo.style.display = 'none';
-    uploadBtn.disabled = true;
-    uploadBtn.file = null;
-    fileInput.value = '';
-    
-    // Hide result areas
+
+    if (cellTypeChart) { cellTypeChart.destroy(); cellTypeChart = null; }
+
+    // Reset step UI
+    document.querySelectorAll('.step').forEach((s, i) => {
+        s.classList.remove('active', 'completed');
+        if (i === 0) s.classList.add('active');
+    });
+    document.querySelectorAll('.step-content').forEach(c => c.classList.remove('active'));
+    document.getElementById('content-1').classList.add('active');
+
+    // Reset Step 1
+    document.getElementById('fileInfo').style.display = 'none';
+    document.getElementById('uploadBtn').disabled = true;
+    document.getElementById('fileInput').value = '';
+
+    // Reset Step 2
+    document.getElementById('validationStatus').style.display = 'block';
     document.getElementById('validationResults').style.display = 'none';
     document.getElementById('validationConfirmation').style.display = 'none';
-    document.getElementById('validationStatus').style.display = 'block';
+
+    // Reset Step 3
+    document.getElementById('mappingStatus').style.display = 'block';
     document.getElementById('mappingResults').style.display = 'none';
     document.getElementById('mappingConfirmation').style.display = 'none';
-    document.getElementById('mappingStatus').style.display = 'block';
-    document.getElementById('finalResults').style.display = 'none';
+
+    // Reset Step 4
     document.getElementById('resultsContainer').style.display = 'block';
-    resetBtn.style.display = 'none';
-    
-    updateStatus('Ready');
-}
+    document.getElementById('finalResults').style.display = 'none';
+    document.getElementById('chartSection').style.display = 'none';
+    document.getElementById('cellTypeTableSection').style.display = 'none';
 
-// Utility function
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    updateStatus('Ready', false);
+    setStatusId(null);
 }
-
-// Global function for HTML calls
-window.closeErrorModal = closeErrorModal;

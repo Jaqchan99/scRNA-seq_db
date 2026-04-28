@@ -11,7 +11,7 @@ import sys
 import traceback
 
 # 测试配置
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8100"
 TEST_FILE = "test_data.h5ad"
 
 def create_test_data():

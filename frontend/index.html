@@ -3,153 +3,346 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta name="frontend-build" content="20260411-4">
     <title>scRNA-seq Data Processing Platform</title>
-    <link rel="stylesheet" href="style.css">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20260411-4">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <h1>scRNA-seq Data Processing Platform</h1>
-            <p>Standardization and Preprocessing of Single-cell RNA Sequencing Data</p>
-        </header>
 
-        <!-- Step Indicator -->
-        <div class="step-indicator">
-            <div class="step active" id="step-1">
-                <div class="step-number">1</div>
-                <div class="step-label">Upload Data</div>
+    <!-- ── Top Navigation ── -->
+    <nav class="navbar">
+        <div class="navbar-inner">
+            <div class="navbar-brand">
+                <span class="brand-icon">⬡</span>
+                <span class="brand-name">scRNA-seq Platform</span>
+                <span class="brand-badge">v2.0</span>
             </div>
-            <div class="step" id="step-2">
-                <div class="step-number">2</div>
-                <div class="step-label">Validation</div>
-            </div>
-            <div class="step" id="step-3">
-                <div class="step-number">3</div>
-                <div class="step-label">Gene Mapping</div>
-            </div>
-            <div class="step" id="step-4">
-                <div class="step-number">4</div>
-                <div class="step-label">Results</div>
+            <div class="navbar-links">
+                <a href="#" class="nav-link active" id="nav-submit" onclick="showPage('submit')">Submit Dataset</a>
+                <a href="#" class="nav-link" id="nav-about" onclick="showPage('about')">About</a>
             </div>
         </div>
+    </nav>
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Step 1: Upload Data -->
-            <div class="step-content active" id="content-1">
-                <h2>Upload h5ad File</h2>
-                <div class="upload-area" id="uploadArea">
-                    <div class="upload-icon">📁</div>
-                    <p>Drag and drop file here or click to select</p>
-                    <p class="upload-hint">Only .h5ad format files are supported</p>
-                    <input type="file" id="fileInput" accept=".h5ad" style="display: none;">
-                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                        Select File
-                    </button>
+    <!-- ── Page: Submit Dataset ── -->
+    <div id="page-submit" class="page active">
+        <div class="container">
+
+            <!-- Page Header -->
+            <header class="page-header">
+                <h1>scRNA-seq Data Preprocessing &amp; Standardisation</h1>
+                <p>Upload your AnnData (.h5ad) file to perform automated structural validation,
+                   gene identifier normalisation, and cell type ontology alignment.</p>
+            </header>
+
+            <!-- Step Indicator -->
+            <div class="step-indicator">
+                <div class="step active" id="step-1">
+                    <div class="step-number">1</div>
+                    <div class="step-label">Upload</div>
                 </div>
-                <div class="file-info" id="fileInfo" style="display: none;">
-                    <h3>File Information</h3>
-                    <div class="info-item">
-                        <span class="label">File Name:</span>
-                        <span class="value" id="fileName"></span>
-                    </div>
-                    <div class="info-item">
-                        <span class="label">File Size:</span>
-                        <span class="value" id="fileSize"></span>
-                    </div>
-                    <button class="btn btn-success" id="uploadBtn" disabled>Start Upload</button>
+                <div class="step-connector"></div>
+                <div class="step" id="step-2">
+                    <div class="step-number">2</div>
+                    <div class="step-label">Validation</div>
+                </div>
+                <div class="step-connector"></div>
+                <div class="step" id="step-3">
+                    <div class="step-number">3</div>
+                    <div class="step-label">Mapping</div>
+                </div>
+                <div class="step-connector"></div>
+                <div class="step" id="step-4">
+                    <div class="step-number">4</div>
+                    <div class="step-label">Results</div>
                 </div>
             </div>
 
-            <!-- Step 2: Data Validation -->
-            <div class="step-content" id="content-2">
-                <h2>Data Validation</h2>
-                <div class="validation-status" id="validationStatus">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Validating data...</p>
+            <!-- Main Content -->
+            <main class="main-content">
+
+                <!-- ── Step 1: Upload ── -->
+                <div class="step-content active" id="content-1">
+                    <div class="step-content-header">
+                        <span class="step-tag">Step 1</span>
+                        <h2>Upload Dataset</h2>
                     </div>
-                </div>
-                <div class="validation-results" id="validationResults" style="display: none;">
-                    <h3>Validation Results</h3>
-                    <div class="result-summary" id="resultSummary"></div>
-                    <div class="result-details" id="resultDetails"></div>
-                    <div class="confirmation-area" id="validationConfirmation" style="display: none;">
-                        <h4>Validation Completed</h4>
-                        <p>Please review the validation results above. If validation passed, you can proceed to the next step.</p>
-                        <div class="confirmation-buttons">
-                            <button class="btn btn-success" id="continueToMapping">Continue: Gene Mapping</button>
-                            <button class="btn btn-secondary" id="cancelProcess">Cancel Processing</button>
+
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                        </div>
+                        <p class="upload-title">Drag &amp; drop your .h5ad file here</p>
+                        <p class="upload-hint">or click to browse — AnnData format only</p>
+                        <input type="file" id="fileInput" accept=".h5ad" style="display:none;">
+                        <button class="btn btn-outline" onclick="document.getElementById('fileInput').click()">
+                            Browse File
+                        </button>
+                    </div>
+
+                    <div class="file-info card" id="fileInfo" style="display:none;">
+                        <div class="card-header">
+                            <h3>File Information</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <span class="info-label">File Name</span>
+                                    <span class="info-value" id="fileName">—</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">File Size</span>
+                                    <span class="info-value" id="fileSize">—</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Disease Type</span>
+                                    <span class="info-value">
+                                        <select id="diseaseType" class="select-input">
+                                            <option value="unknown">Unknown / Not specified</option>
+                                            <option value="normal">Normal (healthy tissue)</option>
+                                            <option value="cancer">Cancer / Tumour</option>
+                                            <option value="disease">Other disease</option>
+                                        </select>
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="card-actions">
+                                <button class="btn btn-primary" id="uploadBtn" disabled>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="20"/></svg>
+                                    Start Upload
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Step 3: Gene Mapping -->
-            <div class="step-content" id="content-3">
-                <h2>Gene Mapping & Cell Type Standardization</h2>
-                <div class="mapping-status" id="mappingStatus">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Performing gene mapping and cell type standardization...</p>
+                <!-- ── Step 2: Validation ── -->
+                <div class="step-content" id="content-2">
+                    <div class="step-content-header">
+                        <span class="step-tag">Step 2</span>
+                        <h2>Structural Validation</h2>
                     </div>
-                </div>
-                <div class="mapping-results" id="mappingResults" style="display: none;">
-                    <h3>Mapping Results</h3>
-                    <div class="mapping-summary" id="mappingSummary"></div>
-                    <div class="mapping-details" id="mappingDetails"></div>
-                    <div class="confirmation-area" id="mappingConfirmation" style="display: none;">
-                        <h4>Mapping Completed</h4>
-                        <p>Please review the mapping results above. If everything looks correct, you can proceed to export the final results.</p>
-                        <div class="confirmation-buttons">
-                            <button class="btn btn-success" id="continueToExport">Continue: Export Results</button>
-                            <button class="btn btn-secondary" id="cancelProcess2">Cancel Processing</button>
+
+                    <div class="loading-panel" id="validationStatus">
+                        <div class="spinner"></div>
+                        <p>Validating AnnData structure and metadata…</p>
+                    </div>
+
+                    <div id="validationResults" style="display:none;">
+                        <div class="metrics-row" id="resultSummary"></div>
+                        <div class="detail-panel" id="resultDetails"></div>
+                        <div class="action-bar" id="validationConfirmation" style="display:none;">
+                            <div class="action-bar-text">
+                                <strong>Validation complete.</strong>
+                                Review the results above, then proceed to gene &amp; cell type mapping.
+                            </div>
+                            <div class="action-bar-buttons">
+                                <button class="btn btn-primary" id="continueToMapping">Continue to Mapping →</button>
+                                <button class="btn btn-ghost" id="cancelProcess">Cancel</button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Step 4: Results -->
-            <div class="step-content" id="content-4">
-                <h2>Processing Results</h2>
-                <div class="results-container" id="resultsContainer">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Generating results...</p>
+                <!-- ── Step 3: Mapping ── -->
+                <div class="step-content" id="content-3">
+                    <div class="step-content-header">
+                        <span class="step-tag">Step 3</span>
+                        <h2>Gene &amp; Cell Type Mapping</h2>
                     </div>
-                </div>
-                <div class="final-results" id="finalResults" style="display: none;">
-                    <h3>Processing Completed</h3>
-                    <div class="result-summary" id="finalSummary"></div>
-                    <div class="download-section">
-                        <h4>Download Results</h4>
-                        <div class="download-buttons">
-                            <button class="btn btn-primary" id="downloadReport">Download Processing Report</button>
-                            <button class="btn btn-success" id="downloadData">Download Processed Data</button>
+
+                    <div class="loading-panel" id="mappingStatus">
+                        <div class="spinner"></div>
+                        <p>Running gene identifier normalisation and cell type ontology alignment…</p>
+                        <p class="loading-sub">This may take 30–120 seconds depending on dataset size.</p>
+                    </div>
+
+                    <div id="mappingResults" style="display:none;">
+                        <div class="metrics-row" id="mappingSummary"></div>
+                        <div class="detail-panel" id="mappingDetails"></div>
+                        <div class="action-bar" id="mappingConfirmation" style="display:none;">
+                            <div class="action-bar-text">
+                                <strong>Mapping complete.</strong>
+                                Proceed to export the standardised dataset and processing report.
+                            </div>
+                            <div class="action-bar-buttons">
+                                <button class="btn btn-primary" id="continueToExport">Export Results →</button>
+                                <button class="btn btn-ghost" id="cancelProcess2">Cancel</button>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-        </main>
 
-        <!-- Status Bar -->
-        <footer class="status-bar">
-            <div class="status-info">
+                <!-- ── Step 4: Results ── -->
+                <div class="step-content" id="content-4">
+                    <div class="step-content-header">
+                        <span class="step-tag">Step 4</span>
+                        <h2>Processing Results</h2>
+                    </div>
+
+                    <div class="loading-panel" id="resultsContainer">
+                        <div class="spinner"></div>
+                        <p>Generating standardised output…</p>
+                    </div>
+
+                    <div id="finalResults" style="display:none;">
+
+                        <!-- Summary metrics (single-row grid filled by script.js) -->
+                        <div id="finalSummary"></div>
+
+                        <!-- Cell Type Distribution Chart -->
+                        <div class="card chart-card" id="chartSection" style="display:none;">
+                            <div class="card-header">
+                                <h3>Cell Type Distribution</h3>
+                                <span class="card-subtitle">Mapped cell type labels with CL ontology identifiers</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container">
+                                    <canvas id="cellTypeChart"></canvas>
+                                </div>
+                                <div class="chart-legend" id="chartLegend"></div>
+                            </div>
+                        </div>
+
+                        <!-- Mapping detail table -->
+                        <div class="card" id="cellTypeTableSection" style="display:none;">
+                            <div class="card-header">
+                                <h3>Cell Type Mapping Details</h3>
+                                <span class="card-subtitle">All unique cell types with ontology assignments</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-wrapper">
+                                    <table class="data-table" id="cellTypeTable">
+                                        <thead>
+                                            <tr>
+                                                <th>Original Label</th>
+                                                <th>CL ID</th>
+                                                <th>Standard Name</th>
+                                                <th>Confidence</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="cellTypeTableBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Download section -->
+                        <div class="card download-card">
+                            <div class="card-header">
+                                <h3>Download Results</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="download-grid">
+                                    <div class="download-item">
+                                        <div class="download-icon">📄</div>
+                                        <div class="download-info">
+                                            <strong>Processing Report</strong>
+                                            <span>JSON audit log of all transformations</span>
+                                        </div>
+                                        <button class="btn btn-outline" id="downloadReport">Download</button>
+                                    </div>
+                                    <div class="download-item">
+                                        <div class="download-icon">🧬</div>
+                                        <div class="download-info">
+                                            <strong>Standardised Dataset</strong>
+                                            <span>Processed .h5ad with CL annotations</span>
+                                        </div>
+                                        <button class="btn btn-primary" id="downloadData">Download</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="reset-bar">
+                            <button class="btn btn-ghost" id="resetBtn">← Process Another Dataset</button>
+                        </div>
+                    </div>
+                </div>
+
+            </main>
+
+            <!-- Status Bar -->
+            <footer class="status-bar">
+                <div class="status-dot" id="statusDot"></div>
                 <span id="currentStatus">Ready</span>
+                <span class="status-id" id="statusId"></span>
+            </footer>
+
+        </div>
+    </div>
+
+    <!-- ── Page: About ── -->
+    <div id="page-about" class="page">
+        <div class="container">
+            <header class="page-header">
+                <h1>About This Platform</h1>
+                <p>A modular preprocessing system for single-cell RNA sequencing data standardisation.</p>
+            </header>
+            <div class="about-grid">
+                <div class="about-card card">
+                    <div class="about-icon">🧬</div>
+                    <h3>Gene Identifier Normalisation</h3>
+                    <p>Converts diverse gene symbols to the GENCODE M32 reference using a curated local mapping table. Achieves &gt;95% mapping success rate without network dependency.</p>
+                </div>
+                <div class="about-card card">
+                    <div class="about-icon">🔬</div>
+                    <h3>Cell Type Ontology Alignment</h3>
+                    <p>Two-stage local algorithm: exact match against a 6,120+ synonym Cell Ontology table, followed by fuzzy matching fallback. Achieves 97.4% accuracy on a 538-label benchmark.</p>
+                </div>
+                <div class="about-card card">
+                    <div class="about-icon">📊</div>
+                    <h3>Incremental Update SOP</h3>
+                    <p>Semi-automated pipeline for expanding the cell type lookup table as new datasets are processed, with automated before/after evaluation reporting.</p>
+                </div>
+                <div class="about-card card">
+                    <div class="about-icon">📋</div>
+                    <h3>Reproducible Reporting</h3>
+                    <p>Every transformation is logged in a machine-readable JSON audit report, enabling full traceability of all mapping decisions.</p>
+                </div>
             </div>
-            <div class="status-actions">
-                <button class="btn btn-secondary" id="resetBtn" style="display: none;">Start Over</button>
+            <div class="about-stats card">
+                <div class="stat-item">
+                    <div class="stat-number">97.4%</div>
+                    <div class="stat-label">Cell Type Mapping Accuracy</div>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <div class="stat-number">100%</div>
+                    <div class="stat-label">Coverage on Benchmark</div>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <div class="stat-number">538</div>
+                    <div class="stat-label">Benchmark Labels</div>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <div class="stat-number">6,120+</div>
+                    <div class="stat-label">CL Synonym Entries</div>
+                </div>
             </div>
-        </footer>
+        </div>
     </div>
 
     <!-- Error Modal -->
-    <div class="modal" id="errorModal" style="display: none;">
+    <div class="modal" id="errorModal" style="display:none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Processing Error</h3>
-                <button class="close-btn" onclick="closeErrorModal()">&times;</button>
+                <h3>Error</h3>
+                <button class="close-btn" onclick="closeErrorModal()">×</button>
             </div>
             <div class="modal-body">
                 <p id="errorMessage"></p>
@@ -160,6 +353,6 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=20260411-4"></script>
 </body>
 </html>
