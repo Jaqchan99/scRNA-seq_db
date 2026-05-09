@@ -26,14 +26,14 @@ class ValidationService:
         try:
             # 检查文件是否存在
             if not os.path.exists(file_path):
-                errors.append(f"文件不存在: {file_path}")
+                errors.append(f"File not found: {file_path}")
                 return {"valid": False, "errors": errors, "warnings": warnings, "metadata": metadata}
             
             # 尝试读取 h5ad 文件
             try:
                 adata = sc.read_h5ad(file_path)
             except Exception as e:
-                errors.append(f"无法读取 h5ad 文件: {str(e)}")
+                errors.append(f"Cannot read h5ad file: {str(e)}")
                 return {"valid": False, "errors": errors, "warnings": warnings, "metadata": metadata}
             
             # 调试日志: 打印文件大小与 AnnData 形状
@@ -45,36 +45,36 @@ class ValidationService:
             
             # 基本结构检查
             if adata.n_obs == 0:
-                errors.append("表达矩阵中没有细胞数据")
+                errors.append("Expression matrix has no cells.")
             if adata.n_vars == 0:
-                errors.append("表达矩阵中没有基因数据")
+                errors.append("Expression matrix has no genes.")
             
             # 检查 obs 列
             missing_obs_cols = [col for col in self.required_obs_columns if col not in adata.obs.columns]
             if missing_obs_cols:
-                warnings.append(f"缺少建议的 obs 列: {missing_obs_cols}")
+                warnings.append(f"Recommended obs columns are missing: {missing_obs_cols}")
             
             # 检查 var 列
             missing_var_cols = [col for col in self.required_var_columns if col not in adata.var.columns]
             if missing_var_cols:
-                warnings.append(f"缺少建议的 var 列: {missing_var_cols}")
+                warnings.append(f"Recommended var columns are missing: {missing_var_cols}")
             
             # 检查基因符号列
             if 'gene_symbol' in adata.var.columns:
                 gene_symbols = adata.var['gene_symbol'].dropna()
                 if len(gene_symbols) == 0:
-                    warnings.append("基因符号列为空")
+                    warnings.append("Gene symbol column is empty.")
                 else:
                     # 检查是否有重复的基因符号
                     duplicates = gene_symbols[gene_symbols.duplicated()]
                     if len(duplicates) > 0:
-                        warnings.append(f"发现重复的基因符号: {len(duplicates)} 个")
+                        warnings.append(f"Duplicate gene symbols found: {len(duplicates)}")
             
             # 检查细胞类型标签
             if 'raw_cell_type_label' in adata.obs.columns:
                 cell_types = adata.obs['raw_cell_type_label'].dropna()
                 if len(cell_types) == 0:
-                    warnings.append("细胞类型标签为空")
+                    warnings.append("Cell type labels column is empty.")
                 else:
                     unique_types = cell_types.unique()
                     metadata['unique_cell_types'] = len(unique_types)
@@ -94,11 +94,11 @@ class ValidationService:
                     from scipy import sparse as _sp
                     if _sp.issparse(adata.X):
                         if np.any(adata.X.data < 0):
-                            warnings.append("表达矩阵包含负值")
+                            warnings.append("Expression matrix contains negative values.")
                     else:
                         X_dense = np.asarray(adata.X)
                         if np.any(X_dense < 0):
-                            warnings.append("表达矩阵包含负值")
+                            warnings.append("Expression matrix contains negative values.")
                 except Exception as _e:
                     print(f"📝 校验调试: 负值检查跳过: {_e}")
             
@@ -118,9 +118,9 @@ class ValidationService:
                     if isinstance(organism_info, str):
                         organism_lower = organism_info.lower()
                         if not any(valid in organism_lower for valid in ['mouse', 'mus']):
-                            warnings.append(f"检测到的物种可能不是小鼠: {organism_info}")
+                            warnings.append(f"Organism may not be mouse: {organism_info}")
                 else:
-                    warnings.append("未找到物种信息，假设为小鼠")
+                    warnings.append("No organism metadata found; assuming mouse.")
             
             # 检查批次信息
             batch_cols = [col for col in adata.obs.columns if 'batch' in col.lower()]
@@ -146,7 +146,7 @@ class ValidationService:
             metadata['file_size_mb'] = os.path.getsize(file_path) / (1024 * 1024)
             
         except Exception as e:
-            errors.append(f"校验过程中发生错误: {str(e)}")
+            errors.append(f"Validation error: {str(e)}")
         
         return {
             "valid": len(errors) == 0,
@@ -162,12 +162,12 @@ class ValidationService:
         # 检查细胞ID唯一性
         if 'cell_id' in adata.obs.columns:
             if adata.obs['cell_id'].duplicated().any():
-                warnings.append("细胞ID不唯一")
+                warnings.append("cell_id values are not unique.")
         
         # 检查基因ID唯一性
         if 'ensembl_gene_id' in adata.var.columns:
             if adata.var['ensembl_gene_id'].duplicated().any():
-                warnings.append("Ensembl基因ID不唯一")
+                warnings.append("Ensembl gene IDs are not unique.")
         
         return warnings
 

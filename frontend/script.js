@@ -2,9 +2,11 @@
 //  scRNA-seq Platform  —  script.js  v2.0
 // ═══════════════════════════════════════════════════════════════
 // UI build id — 若控制台看不到此行，说明浏览器仍在使用缓存的旧 script.js
-const PLATFORM_UI_BUILD = '20260411-4';
+const PLATFORM_UI_BUILD = '20260210-phase2c';
 
 const API_BASE_URL = 'http://localhost:8100';
+/** GitHub 新建 Issue（可改为贵仓库的 annotation 模板链接） */
+const FEEDBACK_ISSUE_URL = 'https://github.com/Jaqchan99/scRNA-seq_db/issues/new';
 
 let currentSubmissionId = null;
 let currentStep = 1;
@@ -74,6 +76,14 @@ function metricCard(label, value, sub, variant) {
 }
 
 // ── Utility ──────────────────────────────────────────────────
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/"/g, '&quot;');
+}
+
 function formatFileSize(bytes) {
     if (bytes < 1024)       return bytes + ' B';
     if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB';
@@ -92,6 +102,45 @@ function getCellTypeMappingDetails(report) {
     const cm = report.cell_type_mapping || {};
     if (cm.mapping_details && cm.mapping_details.length) return cm.mapping_details;
     return (report.mapping_details && report.mapping_details.cell_type_mapping) || [];
+}
+
+/** Step 2：细胞类型 obs 列选择（Phase2） */
+function renderCellTypeColumnPanel(cti) {
+    const host = document.getElementById('cellTypeColumnHost');
+    if (!host) return;
+    if (!cti) {
+        host.innerHTML = '';
+        return;
+    }
+    const req = cti.requires_user_selection;
+    const rec = cti.recommended || '';
+    const cand = cti.candidates || [];
+    let opts = `<option value="">${rec ? `Auto (recommended: ${escapeHtml(rec)})` : 'Auto-detect (recommended column if any)'}</option>`;
+    cand.forEach((c) => {
+        const ex = (c.examples || []).join(', ').slice(0, 60);
+        opts += `<option value="${escapeHtml(c.column)}">${escapeHtml(c.column)} — ${c.n_unique} labels${ex ? ' · e.g. ' + escapeHtml(ex) : ''}</option>`;
+    });
+    const warn = req
+        ? '<p class="msg-warning">⚠ Please confirm which <code>obs</code> column holds cell type text labels before mapping.</p>'
+        : '<p class="msg-success" style="margin-bottom:10px;">✓ A default column was chosen; change below if needed.</p>';
+    host.innerHTML = `
+        <div class="detail-panel cell-type-col-panel">
+            <p style="font-weight:600;color:#1e293b;margin-bottom:6px;">Cell type column</p>
+            ${warn}
+            <label class="sr-only" for="cellTypeColumnSelect">Pick column</label>
+            <select id="cellTypeColumnSelect" class="select-input cell-type-col-select">${opts}</select>
+            <p style="margin-top:10px;font-size:0.85em;color:#64748b;">Or type exact <code>obs</code> column name (overrides list):</p>
+            <input type="text" id="cellTypeColumnCustom" class="select-input cell-type-col-input" placeholder="e.g. cell_type" autocomplete="off" />
+        </div>`;
+}
+
+function openFeedbackIssue() {
+    const title = encodeURIComponent('[Platform] Cell type annotation / unmapped labels');
+    const body = encodeURIComponent(
+        `Short submission ID: ${currentSubmissionId ? currentSubmissionId.slice(0, 8) : 'N/A'}\n\n` +
+            `Describe your issue or attach the reviewed CSV (reviewed=yes).\n`
+    );
+    window.open(`${FEEDBACK_ISSUE_URL}?title=${title}&body=${body}`, '_blank', 'noopener');
 }
 
 /** 映射率展示：兼容 mapping_rate 异常大于 100 的旧报告 */
@@ -124,7 +173,10 @@ function buildFinalSummaryHtml(report) {
     }
 
     const gmPct = formatMappingRatePct(gm);
-    const cmPct = formatMappingRatePct(cm);
+    const cmPct =
+        cm.cell_mapping_rate != null
+            ? Number(cm.cell_mapping_rate).toFixed(1) + '% (cells)'
+            : formatMappingRatePct(cm);
 
     return `
         <div class="final-summary-grid">
@@ -146,7 +198,7 @@ function buildFinalSummaryHtml(report) {
                 <div class="metric-value">${sparsityStr}</div>
             </div>
         </div>
-        <p class="mapping-inline">Gene mapping <strong>${gmPct}</strong> · Cell type mapping <strong>${cmPct}</strong></p>
+        <p class="mapping-inline">Gene mapping <strong>${gmPct}</strong> · Cell-level CL coverage <strong>${cmPct}</strong></p>
     `;
 }
 
@@ -155,7 +207,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('fileInput').addEventListener('change', handleFileSelect);
 
     const area = document.getElementById('uploadArea');
-    area.addEventListener('click', () => document.getElementById('fileInput').click());
+    // 勿与内部 Browse 按钮叠加触发，否则会连续打开两次文件选择器
+    area.addEventListener('click', (e) => {
+        if (e.target.closest('#browseFileBtn')) return;
+        document.getElementById('fileInput').click();
+    });
+    document.getElementById('browseFileBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.getElementById('fileInput').click();
+    });
     area.addEventListener('dragover',  e => { e.preventDefault(); area.classList.add('dragover'); });
     area.addEventListener('dragleave', e => { e.preventDefault(); area.classList.remove('dragover'); });
     area.addEventListener('drop', e => {
@@ -284,6 +344,8 @@ async function showValidationResults() {
         warnings.forEach(w => { html += `<p class="msg-warning">⚠ ${w}</p>`; });
         document.getElementById('resultDetails').innerHTML = html;
 
+        renderCellTypeColumnPanel(report.cell_type_column);
+
         document.getElementById('validationStatus').style.display = 'none';
         document.getElementById('validationResults').style.display = 'block';
 
@@ -296,10 +358,16 @@ async function startMapping() {
     updateStatus('Running gene & cell type mapping…');
 
     try {
-        const res = await fetch(
-            `${API_BASE_URL}/submissions/${currentSubmissionId}/continue`,
-            { method: 'POST' }
-        );
+        const custom = (document.getElementById('cellTypeColumnCustom') || {}).value?.trim() || '';
+        const sel = (document.getElementById('cellTypeColumnSelect') || {}).value || '';
+        const col = custom || sel || null;
+        const payload = col ? { cell_type_column: col } : {};
+
+        const res = await fetch(`${API_BASE_URL}/submissions/${currentSubmissionId}/continue`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
         if (!res.ok) throw new Error('Failed to start mapping');
 
         const timer = setInterval(async () => {
@@ -403,6 +471,22 @@ async function showFinalResults(report) {
         `${API_BASE_URL}/submissions/${currentSubmissionId}/export`,
         `processed_${currentSubmissionId.slice(0,8)}.h5ad`
     );
+
+    const unmappedN = details.filter((d) => d.status !== 'mapped').length;
+    const unmappedRow = document.getElementById('unmappedDownloadRow');
+    if (unmappedRow) {
+        unmappedRow.style.display = unmappedN > 0 ? '' : 'none';
+    }
+    const du = document.getElementById('downloadUnmapped');
+    if (du) {
+        du.onclick = () =>
+            downloadFile(
+                `${API_BASE_URL}/submissions/${currentSubmissionId}/unmapped-labels`,
+                `unmapped_labels_${currentSubmissionId.slice(0, 8)}.csv`
+            );
+    }
+    const fb = document.getElementById('openFeedback');
+    if (fb) fb.onclick = () => openFeedbackIssue();
 
     // 先显示面板，再画图：否则父级 display:none 时 Canvas 宽高为 0，Chart.js 不可见
     document.getElementById('resultsContainer').style.display = 'none';
@@ -568,6 +652,9 @@ function resetProcess() {
     document.getElementById('validationStatus').style.display = 'block';
     document.getElementById('validationResults').style.display = 'none';
     document.getElementById('validationConfirmation').style.display = 'none';
+
+    const cth = document.getElementById('cellTypeColumnHost');
+    if (cth) cth.innerHTML = '';
 
     // Reset Step 3
     document.getElementById('mappingStatus').style.display = 'block';

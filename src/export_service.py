@@ -175,6 +175,7 @@ class ExportService:
                 "mapped_count": gene_mapping_result.get("mapped_count", 0),
                 "unmapped_count": gene_mapping_result.get("unmapped_count", 0),
                 "ambiguous_count": gene_mapping_result.get("ambiguous_count", 0),
+                "success_rate": gene_mapping_result.get("success_rate"),
                 # 与评估侧一致：成功映射基因数 / 总基因数（而非 / 详情条数）
                 "mapping_rate": round(
                     gene_mapping_result.get("mapped_count", 0)

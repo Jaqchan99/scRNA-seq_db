@@ -1,5 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Body
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
@@ -7,6 +7,10 @@ import uuid
 from datetime import datetime
 from typing import Optional
 import json
+import csv
+from io import StringIO
+
+from pydantic import BaseModel
 
 from database import get_db, init_db, Submission, MappingLog
 from upload_service import UploadService
@@ -38,6 +42,11 @@ upload_service = UploadService()
 validation_service = ValidationService()
 mapping_service = MappingService()
 export_service = ExportService()
+
+
+class ContinueRequest(BaseModel):
+    """继续执行映射时的可选参数"""
+    cell_type_column: Optional[str] = None
 
 @app.on_event("startup")
 async def startup_event():
@@ -181,6 +190,7 @@ async def validate_submission(submission_id: str, background_tasks: BackgroundTa
         raise HTTPException(status_code=404, detail="提交任务不存在")
     
     submission.status = "validating"
+    submission.cell_type_column = None
     db.commit()
     db.close()
     
@@ -189,8 +199,12 @@ async def validate_submission(submission_id: str, background_tasks: BackgroundTa
     return {"status": "validating", "message": "开始数据校验"}
 
 @app.post("/submissions/{submission_id}/continue")
-async def continue_processing(submission_id: str, background_tasks: BackgroundTasks):
-    """继续处理（执行映射和导出）"""
+async def continue_processing(
+    submission_id: str,
+    background_tasks: BackgroundTasks,
+    body: ContinueRequest = Body(default_factory=ContinueRequest),
+):
+    """继续处理（执行映射和导出）。可选 JSON body: {\"cell_type_column\": \"obs列名\"}，空则自动检测。"""
     db = next(get_db())
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
@@ -199,6 +213,10 @@ async def continue_processing(submission_id: str, background_tasks: BackgroundTa
     if submission.status != "validated":
         raise HTTPException(status_code=400, detail="请先完成数据校验")
     
+    col = body.cell_type_column
+    if col is not None:
+        col = str(col).strip() or None
+    submission.cell_type_column = col
     submission.status = "mapping"
     db.commit()
     db.close()
@@ -206,6 +224,53 @@ async def continue_processing(submission_id: str, background_tasks: BackgroundTa
     background_tasks.add_task(process_mapping_and_export, submission_id)
     
     return {"status": "mapping", "message": "开始基因映射和细胞类型标准化"}
+
+
+@app.get("/submissions/{submission_id}/unmapped-labels")
+async def download_unmapped_labels_template(submission_id: str):
+    """下载未映射细胞类型的 CSV 模板，供用户手写 cl_id / cl_label 后走审核合并脚本。"""
+    db = next(get_db())
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="提交任务不存在")
+    if submission.status != "completed":
+        raise HTTPException(status_code=400, detail="请先完成全流程处理后再下载未映射模板")
+    rp = submission.report_path
+    if not rp or not os.path.exists(rp):
+        raise HTTPException(status_code=404, detail="报告不存在")
+    db.close()
+
+    with open(rp, "r", encoding="utf-8") as f:
+        report = json.load(f)
+    nested = report.get("mapping_details") or {}
+    details = nested.get("cell_type_mapping") or []
+    if not details and report.get("cell_type_mapping", {}).get("mapping_details"):
+        details = report["cell_type_mapping"]["mapping_details"]
+
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["label_text", "cell_count", "cl_id", "cl_label", "reviewed", "notes"])
+    for d in details:
+        if d.get("status") == "mapped":
+            continue
+        w.writerow([
+            d.get("raw_cell_type", ""),
+            d.get("cell_count", ""),
+            d.get("cl_id") or "",
+            d.get("cl_label") or "",
+            "no",
+            f"submission:{submission_id[:8]}",
+        ])
+
+    out = buf.getvalue().encode("utf-8-sig")
+    return Response(
+        content=out,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="unmapped_labels_{submission_id[:8]}.csv"'
+        },
+    )
+
 
 def process_validation(submission_id: str):
     """只执行数据校验"""
@@ -235,6 +300,16 @@ def process_validation(submission_id: str):
             db.close()
             return
         
+        # 细胞类型 obs 列发现（供前端 Phase2 选择）
+        cell_type_column_info = None
+        if validation_result["valid"]:
+            try:
+                import scanpy as sc
+                adata_peek = sc.read_h5ad(submission.file_path)
+                cell_type_column_info = mapping_service.discover_cell_type_column_info(adata_peek)
+            except Exception as e:
+                print(f"⚠️ 细胞类型列扫描失败: {e}")
+
         # 保存校验结果到临时文件
         import json
         validation_report_path = f"reports/validation_{submission_id}.json"
@@ -242,7 +317,8 @@ def process_validation(submission_id: str):
         with open(validation_report_path, 'w') as f:
             json.dump({
                 "validation_result": validation_result,
-                "summary": validation_result.get("metadata", {})
+                "summary": validation_result.get("metadata", {}),
+                "cell_type_column": cell_type_column_info,
             }, f, indent=2, ensure_ascii=False)
         
         submission.status = "validated"
@@ -282,9 +358,13 @@ def process_mapping_and_export(submission_id: str):
         print(f"🧬 开始基因映射 {submission_id}")
         gene_mapping_result = mapping_service.map_genes(submission.file_path)
         
-        # 细胞类型映射
+        # 细胞类型映射（尊重用户在 continue 时选择的 obs 列）
         print(f"🔬 开始细胞类型标准化 {submission_id}")
-        cell_type_result = mapping_service.map_cell_types(submission.file_path)
+        override_col = submission.cell_type_column
+        cell_type_result = mapping_service.map_cell_types(
+            submission.file_path,
+            cell_type_column=override_col,
+        )
         
         # 导出结果
         print(f"📤 开始导出结果 {submission_id}")
@@ -445,7 +525,9 @@ async def root():
             "upload_file": "POST /submissions/{id}/upload",
             "get_status": "GET /submissions/{id}/status",
             "get_report": "GET /submissions/{id}/report",
-            "get_export": "GET /submissions/{id}/export"
+            "get_export": "GET /submissions/{id}/export",
+            "unmapped_csv": "GET /submissions/{id}/unmapped-labels",
+            "continue_mapping": "POST /submissions/{id}/continue JSON { cell_type_column? }",
         }
     }
 

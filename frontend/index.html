@@ -4,14 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta name="frontend-build" content="20260411-4">
+    <meta name="frontend-build" content="20260210-phase2c">
     <title>scRNA-seq Data Processing Platform</title>
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260411-4">
+    <link rel="stylesheet" href="style.css?v=20260210-phase2c">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -86,7 +85,7 @@
                         <p class="upload-title">Drag &amp; drop your .h5ad file here</p>
                         <p class="upload-hint">or click to browse — AnnData format only</p>
                         <input type="file" id="fileInput" accept=".h5ad" style="display:none;">
-                        <button class="btn btn-outline" onclick="document.getElementById('fileInput').click()">
+                        <button type="button" class="btn btn-outline" id="browseFileBtn">
                             Browse File
                         </button>
                     </div>
@@ -141,6 +140,7 @@
 
                     <div id="validationResults" style="display:none;">
                         <div class="metrics-row" id="resultSummary"></div>
+                        <div id="cellTypeColumnHost"></div>
                         <div class="detail-panel" id="resultDetails"></div>
                         <div class="action-bar" id="validationConfirmation" style="display:none;">
                             <div class="action-bar-text">
@@ -252,7 +252,7 @@
                                             <strong>Processing Report</strong>
                                             <span>JSON audit log of all transformations</span>
                                         </div>
-                                        <button class="btn btn-outline" id="downloadReport">Download</button>
+                                        <button type="button" class="btn btn-outline" id="downloadReport">Download</button>
                                     </div>
                                     <div class="download-item">
                                         <div class="download-icon">🧬</div>
@@ -260,7 +260,23 @@
                                             <strong>Standardised Dataset</strong>
                                             <span>Processed .h5ad with CL annotations</span>
                                         </div>
-                                        <button class="btn btn-primary" id="downloadData">Download</button>
+                                        <button type="button" class="btn btn-primary" id="downloadData">Download</button>
+                                    </div>
+                                    <div class="download-item" id="unmappedDownloadRow" style="display:none;">
+                                        <div class="download-icon">⚠️</div>
+                                        <div class="download-info">
+                                            <strong>Unmapped labels (CSV)</strong>
+                                            <span>Fill cl_id / cl_label, set reviewed=yes, then run merge_reviewed_unmapped.py after review</span>
+                                        </div>
+                                        <button type="button" class="btn btn-outline" id="downloadUnmapped">Download</button>
+                                    </div>
+                                    <div class="download-item">
+                                        <div class="download-icon">💬</div>
+                                        <div class="download-info">
+                                            <strong>Submit annotation feedback</strong>
+                                            <span>Open GitHub issue to send reviewed annotations or questions</span>
+                                        </div>
+                                        <button type="button" class="btn btn-ghost" id="openFeedback">Open issue…</button>
                                     </div>
                                 </div>
                             </div>
@@ -353,6 +369,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260411-4"></script>
+    <script src="script.js?v=20260210-phase2c"></script>
 </body>
 </html>

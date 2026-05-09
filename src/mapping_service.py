@@ -10,6 +10,17 @@ import os
 import re
 from difflib import SequenceMatcher
 
+
+def _column_name_suggests_cell_annotation(name: str) -> bool:
+    """列名是否像细胞类型 / 注释列（用于判断是否需要用户点选）。"""
+    n = str(name).lower()
+    keys = (
+        'cell', 'type', 'annot', 'cluster', 'leiden', 'louvain',
+        'subtype', 'label', 'ontology', 'lineage', 'ident', 'seurat',
+    )
+    return any(k in n for k in keys)
+
+
 class MappingService:
     """基因和细胞类型映射服务"""
     
@@ -149,6 +160,58 @@ class MappingService:
                 return col
         
         return None
+
+    def discover_cell_type_column_info(self, adata) -> Dict[str, Any]:
+        """扫描 obs，列出可能用作细胞类型注释的列，供校验阶段与前端选择。
+
+        requires_user_selection:
+        - 自动检测失败但存在候选列；或
+        - 存在且仅存在多个「列名像注释」且 n_unique 均 ≥ 3 的列（易混淆）。
+        """
+        recommended = self._find_cell_type_column(adata)
+        candidates: List[Dict[str, Any]] = []
+        max_n = min(5000, max(50, int(adata.n_obs * 0.5)))
+        min_cells = max(1, int(adata.n_obs * 0.01))
+
+        for col in adata.obs.columns:
+            ser = adata.obs[col].dropna()
+            if len(ser) < min_cells:
+                continue
+            nu = int(ser.nunique())
+            if nu < 2 or nu > max_n:
+                continue
+            # 跳过高基数浮点连续特征
+            if pd.api.types.is_float_dtype(ser.dtype) and nu > max(30, int(adata.n_obs * 0.25)):
+                continue
+            try:
+                top = ser.astype(str).value_counts().head(3).index.tolist()
+                examples = [str(x)[:48] for x in top]
+            except Exception:
+                examples = []
+            candidates.append({
+                "column": col,
+                "n_unique": nu,
+                "examples": examples,
+            })
+
+        candidates.sort(key=lambda x: (-x["n_unique"], x["column"]))
+        candidates = candidates[:48]
+
+        annot_like = [c for c in candidates if _column_name_suggests_cell_annotation(c["column"])]
+        requires_user_selection = False
+        if recommended is None and len(candidates) >= 1:
+            requires_user_selection = True
+        elif len(annot_like) >= 2:
+            # 至少两个「看起来像」注释的列，容易选错
+            nu_ok = [c for c in annot_like if c["n_unique"] >= 3]
+            if len(nu_ok) >= 2:
+                requires_user_selection = True
+
+        return {
+            "recommended": recommended,
+            "candidates": candidates,
+            "requires_user_selection": requires_user_selection,
+        }
     
     def _normalize_cell_type_name(self, name: str) -> str:
         """标准化细胞类型名称"""
@@ -462,8 +525,13 @@ class MappingService:
                 "error": str(e)
             }
     
-    def map_cell_types(self, file_path: str) -> Dict[str, Any]:
-        """细胞类型标准化 - 使用本地映射表（两阶段：精确匹配 + 模糊匹配）"""
+    def map_cell_types(self, file_path: str, cell_type_column: Optional[str] = None) -> Dict[str, Any]:
+        """细胞类型标准化 - 使用本地映射表（两阶段：精确匹配 + 模糊匹配）
+
+        Args:
+            file_path: h5ad 路径
+            cell_type_column: 可选，用户在前端指定的 obs 列名；无效时回退自动检测。
+        """
         print("🔬 开始细胞类型标准化...")
 
         try:
@@ -471,11 +539,19 @@ class MappingService:
 
             adata = ad.read_h5ad(file_path)
 
-            # 自动检测细胞类型列
+            # 自动检测细胞类型列，或尊重用户指定列
             # 注意：即使数据集已有 cl_id 列（如 Tabula Muris），仍需跑算法，
             # 因为前端需要 mapping_details（含每种 cell type 的细胞数量）来渲染图表。
-            # 原有的"跳过"逻辑会导致 mapping_details 为空，图表无法显示。
-            cell_type_col = self._find_cell_type_column(adata)
+            cell_type_col = None
+            if cell_type_column and str(cell_type_column).strip():
+                c = str(cell_type_column).strip()
+                if c in adata.obs.columns:
+                    cell_type_col = c
+                    print(f"📍 使用用户指定细胞类型列: {cell_type_col}")
+                else:
+                    print(f"⚠️ 用户指定列 {c!r} 不在 obs 中，回退自动检测")
+            if cell_type_col is None:
+                cell_type_col = self._find_cell_type_column(adata)
             if cell_type_col is None:
                 print("⚠️ 未找到细胞类型列，尝试使用的列名均不存在")
                 return {

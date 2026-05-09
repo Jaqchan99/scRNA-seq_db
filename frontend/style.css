@@ -26,6 +26,21 @@ body {
     min-height: 100vh;
 }
 
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.cell-type-col-panel { margin-bottom: 16px; }
+.cell-type-col-select, .cell-type-col-input { width: 100%; max-width: 520px; display: block; }
+
 /* ── Navigation Bar ── */
 .navbar {
     position: sticky;
@@ -669,27 +684,49 @@ body {
 
 .download-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap: 10px;
 }
 
 .download-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 8px 12px;
+    align-items: start;
     padding: 12px 14px;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
 }
 
-.download-icon { font-size: 1.8em; flex-shrink: 0; }
+.download-icon {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    font-size: 1.8em;
+    flex-shrink: 0;
+    line-height: 1;
+    padding-top: 2px;
+}
 
 .download-info {
-    flex: 1;
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 3px;
+}
+
+.download-item > .btn {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+    max-width: 100%;
+    width: auto;
+    box-sizing: border-box;
+    white-space: normal;
+    text-align: center;
 }
 
 .download-info strong {
@@ -700,6 +737,8 @@ body {
 .download-info span {
     font-size: 0.82em;
     color: #94a3b8;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
 }
 
 /* ── Reset Bar ── */
@@ -893,7 +932,7 @@ body {
     .action-bar { flex-direction: column; align-items: flex-start; }
     .about-stats { flex-direction: column; }
     .stat-divider { width: 80px; height: 1px; }
-    .download-item { flex-wrap: wrap; }
+    .download-item > .btn { justify-self: stretch; max-width: 100%; }
 }
 
 @media (max-width: 480px) {
